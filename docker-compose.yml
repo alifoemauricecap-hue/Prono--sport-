@@ -1,0 +1,39 @@
+# PRONO SPORT 2.0 — stack 100 % open-source, 0 € de licence ni d'abonnement.
+#
+# Usage 1 (recommandé, zéro effort) : SQLite intégré, rien à installer d'autre
+#   docker compose up api
+#
+# Usage 2 (multi-instances) : + PostgreSQL
+#   docker compose --profile postgres up
+services:
+  api:
+    build: ./backend
+    environment:
+      # SQLite dans le volume /data (persistant) — GRATUIT par défaut
+      DATABASE_URL: sqlite:////data/prono_sport.db
+      AUTO_INGEST: "1"
+      AUTO_LIVE: "1"
+      FOOTBALL_DATA_ORG_TOKEN: ${FOOTBALL_DATA_ORG_TOKEN:-}
+    ports: ["8000:8000"]
+    volumes: ["pronodata:/data"]
+
+  postgres:
+    image: postgres:16-alpine
+    profiles: ["postgres"]
+    environment:
+      POSTGRES_USER: prono
+      POSTGRES_PASSWORD: prono
+      POSTGRES_DB: pronosport
+    ports: ["5432:5432"]
+    volumes: ["pgdata:/var/lib/postgresql/data"]
+
+  redis:
+    image: redis:7-alpine
+    profiles: ["postgres"]
+    ports: ["6379:6379"]
+    volumes: ["redisdata:/data"]
+
+volumes:
+  pronodata:
+  pgdata:
+  redisdata:

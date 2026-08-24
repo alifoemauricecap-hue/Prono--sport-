@@ -1,0 +1,13 @@
+# PRONO SPORT 2.0 — dépendances backend (toutes gratuites, licences libres)
+sqlalchemy>=2.0,<3.0
+httpx>=0.27
+numpy>=1.26
+fastapi>=0.110
+uvicorn[standard]>=0.29
+
+# Tests / CI
+pytest>=8.0
+
+# Optionnel :
+#   pillow             → logos 64px intégrés dans l'instantané HTML (make_snapshot.py)
+#   psycopg[binary]    → prod PostgreSQL
