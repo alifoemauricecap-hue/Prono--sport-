@@ -109,6 +109,7 @@ def fit_dixon_coles(base: TeamStrengths, matches, cutoff: datetime,
     w = np.exp(-XI_TIME_DECAY * np.array([(now - d).days for d in dates], dtype=float))
 
     def neg_ll_rho(rho: float) -> float:
+        rho = float(np.asarray(rho).ravel()[0])
         total = 0.0
         for (h, a, hs, as_), wi in zip([(p[0], p[1], p[2], p[3]) for p in past], w):
             if (h not in base.attack) or (a not in base.attack):
