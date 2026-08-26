@@ -1,4 +1,4 @@
-# PRONO SPORT 2.0 — image UNIVERSELLE (contexte de build = racine du repo)
+# PRONO SPORT 3.0 — image UNIVERSELLE (contexte de build = racine du repo)
 # Fonctionne tel quel sur Back4App, Koyeb, et tout hébergeur Docker.
 FROM python:3.13-slim
 

@@ -79,6 +79,25 @@ aucune API payante. Elle est conçue pour **rester 100 % fonctionnelle sans rés
 > C'est un choix de transparence, pas une limitation : PRONO SPORT préfère l'abstention affichée
 > à la donnée inventée.
 
+## Déploiement (0 € — prêt dans le repo)
+
+| Où | Fichier | Pour qui |
+|---|---|---|
+| **Koyeb** (recommandé, 24/7) | `Dockerfile.koyeb` | le plus simple : déploiement depuis GitHub, 512 Mo RAM, **jamais de carte demandée en 0 €** dans la plupart des régions (sinon → HF) |
+| **Hugging Face Spaces** | `deploy/hf-space/Dockerfile` | alternative sans carte bancaire ; repo GitHub **déjà configuré** dans le fichier |
+| **docker compose** (VPS / machine perso) | `docker-compose.yml` + `backend/Dockerfile` | `docker compose up api` — SQLite persistant, option PostgreSQL |
+| **Installation locale / Termux** | `install.sh` | 1 commande : venv + base + ingestion + moteur |
+| **Site statique public (bonus)** | `.github/workflows/update-site.yml` | snapshot auto-mis-à-jour toutes les 6 h sur GitHub Pages (0 €) |
+
+**Comportement au premier déploiement** : l'app démarre immédiatement (interface FR + API) avec
+« DONNÉE NON DISPONIBLE », puis le **bootstrap auto** remplit la base avec les vraies données
+publiques (5 étapes, ~20-40 min) — tout est journalisé, idempotent, `|| true` (§64 : une source KO
+n'arrête jamais le tout).
+
+**Avant de déployer** : fusionner la branche `arena/01a03e4e-prono-sport` dans `main` (les images
+Docker se construisent depuis `main`). Ensuite, suivre le guide adapté :
+`docs/05-GUIDE-HUGGINGFACE.md` ou `docs/06-GUIDE-KOYEB.md` (pas à pas, 5 min).
+
 ## Documentation
 
 - `TECHNICAL_MASTER_PLAN.md` — le plan technique complet (22 points + fiches sources)

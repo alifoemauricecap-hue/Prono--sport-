@@ -1,4 +1,4 @@
-# Guide 06 — Héberger PRONO SPORT 2.0 sur KOYEB (LE PLUS SIMPLE — 0 €, 24/7, depuis ton téléphone)
+# Guide 06 — Héberger PRONO SPORT 3.0 sur KOYEB (LE PLUS SIMPLE — 0 €, 24/7, depuis ton téléphone)
 
 **Pourquoi Koyeb** : déploiement direct depuis ton GitHub en quelques clics — **aucun fichier à créer ni coller**
 (tout est déjà dans ton repo : `Dockerfile.koyeb`). Gratuit à vie, toujours en ligne, 512 Mo RAM / 2 Go disque.
@@ -29,7 +29,7 @@
 ## ÉTAPE 2 — Créer le service (3 min)
 
 1. Clique **Create Web Service** (ou **+ Create App**).
-2. Choisis **GitHub** comme source → autorise Koyeb à lire tes repos (bouton **Install GitHub app** si demandé) → sélectionne **`prono-sport`**.
+2. Choisis **GitHub** comme source → autorise Koyeb à lire tes repos (bouton **Install GitHub app** si demandé) → sélectionne **`Prono--sport-`**.
 3. Koyeb détecte le projet. Règle ces 3 champs :
    - **Builder** : `Dockerfile`
    - **Dockerfile path** : `Dockerfile.koyeb`  *(c'est le fichier que j'ai mis à la racine du repo)*
@@ -41,14 +41,14 @@
 
 ## ÉTAPE 3 — Attendre la mise en route (5-10 min + 20-40 min)
 
-- Onglet **Logs/Deployments** : tu vois le build puis `PRONO SPORT 2.0 en ligne sur le port 8000`.
+- Onglet **Logs/Deployments** : tu vois le build puis `PRONO SPORT 3.0 en ligne sur le port 8000`.
 - Le **bootstrap** remplit ensuite les vraies données en fond (`[1/5]` → `[5/5]`, 20-40 min).
 - Pendant ce temps l'app affiche « DONNÉE NON DISPONIBLE » — c'est l'honnêteté §1, pas une panne.
 - Ton adresse permanente : **`https://prono-sport-TONSERVICE.koyeb.app`** (visible en haut du service).
 
 ## ÉTAPE 4 — Vérifier (30 secondes)
 
-Ouvre ton adresse → tu dois voir l'application PRONO SPORT 2.0 avec :
+Ouvre ton adresse → tu dois voir l'application PRONO SPORT 3.0 avec :
 - les matchs du jour avec logos,
 - l'onglet **VALUE BETS**,
 - la **minute live** quand un match est en cours,

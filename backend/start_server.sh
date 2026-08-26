@@ -1,5 +1,5 @@
 #!/bin/sh
-# PRONO SPORT 2.0 — démarrage universel 24/7 (Koyeb / HF Spaces / VPS / Termux).
+# PRONO SPORT 3.0 — démarrage universel 24/7 (Koyeb / HF Spaces / VPS / Termux).
 # §1 honnêteté : base vide -> on NE SIMULE RIEN. L'API répond tout de suite
 # ("DONNÉE NON DISPONIBLE") pendant que le bootstrap remplit les VRAIES données en fond.
 set -e
@@ -22,5 +22,5 @@ if [ "$NEED" = "yes" ]; then
 fi
 
 PORT="${PORT:-8000}"
-echo "PRONO SPORT 2.0 en ligne sur le port $PORT"
+echo "PRONO SPORT 3.0 en ligne sur le port $PORT"
 exec uvicorn app.api:app --host 0.0.0.0 --port "$PORT"

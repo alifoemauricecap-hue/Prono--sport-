@@ -1,4 +1,4 @@
-# PRONO SPORT 2.0 — image backend (build local GRATUIT : docker build ./backend)
+# PRONO SPORT 3.0 — image backend (build local GRATUIT : docker build ./backend)
 FROM python:3.13-slim
 
 WORKDIR /srv

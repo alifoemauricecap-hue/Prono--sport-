@@ -1,17 +1,13 @@
-# PRONO SPORT 2.0 — image HUGGING FACE SPACES (port officiel : 7860)
-# Le code est récupéré depuis TON dépôt GitHub (tu ne changes qu'UNE ligne ci-dessous).
+# PRONO SPORT 3.0 — image HUGGING FACE SPACES (port officiel : 7860)
+# Le code est récupéré depuis TON dépôt GitHub (repo déjà configuré ci-dessous).
 FROM python:3.13-slim
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends git ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-# ====================================================================
-# ⚠️ REMPLACE « TON-COMPTE » PAR TON NOM D'UTILISATEUR GITHUB ⚠️
-# Exemple : si ton GitHub est https://github.com/koffi95/prono-sport
-#           écris : https://github.com/koffi95/prono-sport.git
-# ====================================================================
-ARG REPO_URL=https://github.com/TON-COMPTE/prono-sport.git
+# Repo GitHub configuré (branche main). À changer seulement si tu renomes ton dépôt.
+ARG REPO_URL=https://github.com/alifoemauricecap-hue/Prono--sport-.git
 
 WORKDIR /srv
 RUN git clone --depth 1 "$REPO_URL" repo
