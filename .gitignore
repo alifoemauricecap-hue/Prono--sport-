@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+
+# Données locales (regénérables par les workers)
+data/
+*.db
+*.db-wal
+*.db-shm
+
+# OS / IDE
+.DS_Store
+.idea/
+.vscode/
+
+# Logs / temporaires
+*.log
+/tmp/
+tools/raw/
+tools/job_*.json

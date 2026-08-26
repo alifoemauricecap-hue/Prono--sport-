@@ -120,14 +120,10 @@ class FootballDataUKProvider(Provider):
     def fetch_fixtures_all(self) -> str:
         """fixtures.csv : TOUS les matchs À VENIR + COTES ACTUELLES réelles (~10 bookmakers,
         consensus Max/Avg) — la clé du Value Bet pré-match M4 (§30/§83)."""
-        r = httpx.get(
-            "https://www.football-data.co.uk/fixtures.csv",
-            timeout=HTTP_TIMEOUT_SECONDS,
-            follow_redirects=True,
-            headers={"User-Agent": HTTP_USER_AGENT},
-        )
-        r.raise_for_status()
-        return r.text
+        from ..providers.cache import http_get_text
+        text, _origin = http_get_text(
+            "https://www.football-data.co.uk/fixtures.csv", ttl_seconds=6 * 3600)
+        return text
 
     def parse_fixtures_csv(self, payload: str,
                            source_url: str = "https://www.football-data.co.uk/fixtures.csv"
@@ -180,14 +176,9 @@ class FootballDataUKProvider(Provider):
             )
 
     def fetch(self, div: str, season: str) -> str:
-        r = httpx.get(
-            self.url_for(div, season),
-            timeout=HTTP_TIMEOUT_SECONDS,
-            follow_redirects=True,
-            headers={"User-Agent": HTTP_USER_AGENT},
-        )
-        r.raise_for_status()
-        return r.text
+        from ..providers.cache import http_get_text
+        text, _origin = http_get_text(self.url_for(div, season), ttl_seconds=6 * 3600)
+        return text
 
     def parse(self, payload: str, div: str, season: str, source_url: str | None = None) -> Iterable[RawFixture]:
         area, comp_name = DIVISIONS.get(div, ("?", div))

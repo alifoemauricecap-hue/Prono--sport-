@@ -198,6 +198,21 @@ def ingest_one(session: Session, raw: RawFixture, report: IngestReport) -> None:
     _ingest_odds(session, fx, raw, now, report)
 
 
+def attach_odds_to_fixture(session: Session, fx: Fixture, odds: list,
+                           provider_name: str, now: datetime | None = None) -> int:
+    """Insère les snapshots de cotes d'un fixture (append-only, idempotent par valeur).
+
+    Utilisé par l'ingestion classique ET par les providers de cotes dédiés
+    (ex. The Odds API) qui associent leurs cotes à un match déjà en base.
+    Retourne le nombre de nouveaux snapshots.
+    """
+    now = now or datetime.now(timezone.utc)
+    report = IngestReport(provider=provider_name)
+    holder = type("_RawOdds", (), {"odds": odds})()
+    _ingest_odds(session, fx, holder, now, report)
+    return report.odds_rows
+
+
 def _ingest_odds(session: Session, fx: Fixture, raw: RawFixture, now: datetime, report: IngestReport) -> None:
     """Append-only (§30) : on n'insère un snapshot que s'il est nouveau (valeur différente
     du dernier snapshot connu pour ce bookmaker/marché/sélection)."""

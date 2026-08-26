@@ -1,0 +1,132 @@
+"""Wikipedia (FR/EN) — API REST publique, gratuite, sans clé (0 €).
+
+Utilisation pour la RECHERCHE APPROFONDIE :
+- search_wikipedia() : opensearch pour trouver les articles pertinents.
+- wikipedia_summary() : extrait du résumé d'un article (contexte historique,
+  palmarès, effectif) — JAMAIS de donnée chiffrée de match (ce n'est pas sa mission,
+  §45 : l'IA/recherche contextualise, les modèles calculent).
+
+Attribution requise (CC BY-SA) → chaque résultat porte sa source + licence.
+Cache mémoire TTL 24 h (les articles ne bougent pas à l'échelle d'un match).
+"""
+from __future__ import annotations
+
+import time
+
+import httpx
+
+BASE_FR = "https://fr.wikipedia.org"
+BASE_EN = "https://en.wikipedia.org"
+TTL_SECONDS = 24 * 3600
+TIMEOUT = 10.0
+
+_cache: dict[str, tuple[float, object]] = {}
+
+
+def _cached(key: str, ttl: int = TTL_SECONDS):
+    hit = _cache.get(key)
+    if hit and time.time() - hit[0] < ttl:
+        return hit[1]
+    return None
+
+
+def _store(key: str, value) -> None:
+    _cache[key] = (time.time(), value)
+
+
+def _clean(text: str | None) -> str | None:
+    if not text:
+        return None
+    import re
+    txt = re.sub(r"\[\d+\]", "", text)          # supprime les notes [1]
+    txt = re.sub(r"\{\{[^}]*\}\}", "", txt)     # supprime les modèles
+    txt = " ".join(txt.split())
+    return txt[:1500] or None
+
+
+def wikipedia_summary(title: str, lang: str = "fr") -> dict | None:
+    """Résumé d'un article (extract, url, image) — None si introuvable."""
+    key = f"sum|{lang}|{title}"
+    hit = _cached(key)
+    if hit is not None:
+        return hit
+    base = BASE_FR if lang == "fr" else BASE_EN
+    try:
+        r = httpx.get(
+            f"{base}/api/rest_v1/page/summary/{title.replace(' ', '_')}",
+            timeout=TIMEOUT,
+        )
+        if r.status_code != 200:
+            _store(key, None)
+            return None
+        data = r.json()
+        if data.get("type") != "standard" or not data.get("extract"):
+            _store(key, None)
+            return None
+        out = {
+            "title": data.get("title"),
+            "extract": _clean(data.get("extract")),
+            "url": data.get("content_urls", {}).get("desktop", {}).get("page"),
+            "thumbnail": (data.get("thumbnail") or {}).get("source"),
+            "source": f"Wikipedia ({lang}) — CC BY-SA",
+            "license": "CC BY-SA 4.0",
+        }
+        _store(key, out)
+        return out
+    except Exception:
+        return None  # réseau indisponible → silence honnête, jamais de fabrication
+
+
+def search_wikipedia(query: str, lang: str = "fr", limit: int = 5) -> list[dict]:
+    """Recherche d'articles (opensearch) — pour le moteur de recherche global."""
+    key = f"srch|{lang}|{query}"
+    hit = _cached(key)
+    if hit is not None:
+        return hit[:limit]
+    base = BASE_FR if lang == "fr" else BASE_EN
+    try:
+        r = httpx.get(
+            f"{base}/w/api.php",
+            params={
+                "action": "opensearch", "search": query,
+                "limit": str(limit), "namespace": "0",
+                "format": "json", "origin": "*", "redirects": "1",
+            },
+            timeout=TIMEOUT,
+        )
+        r.raise_for_status()
+        data = r.json()
+        titles = data[1] if isinstance(data, list) else []
+        out = []
+        for t in titles:
+            out.append({
+                "title": t,
+                "url": f"{base}/wiki/{t.replace(' ', '_')}",
+                "source": f"Wikipedia ({lang}) — CC BY-SA",
+                "license": "CC BY-SA 4.0",
+            })
+        _store(key, out)
+        return out
+    except Exception:
+        return []
+
+
+def context_for_team(team_name: str) -> dict | None:
+    """Contexte historique d'une équipe (article FR, sinon EN)."""
+    s = wikipedia_summary(team_name, "fr")
+    if s and s.get("extract"):
+        return s
+    return wikipedia_summary(team_name, "en")
+
+
+def context_for_competition(comp_name: str, season_label: str | None = None) -> dict | None:
+    """Contexte d'une compétition (option. saison)."""
+    candidates = []
+    if season_label:
+        candidates.append(f"{comp_name} {season_label}")
+    candidates.append(comp_name)
+    for c in candidates:
+        s = wikipedia_summary(c, "fr") or wikipedia_summary(c, "en")
+        if s and s.get("extract"):
+            return s
+    return None

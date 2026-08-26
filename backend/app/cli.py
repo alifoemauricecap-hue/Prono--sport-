@@ -299,6 +299,84 @@ def cmd_predictions(args) -> int:
     return 0
 
 
+def cmd_ingest_apifootball(args) -> int:
+    """P4 : compositions + blessures via API-Football (clé GRATUITE, ~100 req/jour)."""
+    from datetime import date
+    from .providers import api_football as af
+    if not af.available():
+        print(json.dumps({"error": "MISSING DEPENDENCY : API_FOOTBALL_KEY absente "
+                                   "(clé gratuite à créer sur api-sports.io)"},
+                         ensure_ascii=False, indent=2))
+        return 1
+    day = args.date or date.today().isoformat()
+    p = af.ApiFootballProvider()
+    s = _session()
+    try:
+        payload = p.fetch(day)
+        raws = list(p.parse(payload, day, source_url=p.fixtures_url(day)))
+        rep = run_ingestion(s, p, raws)
+        from .ingest.enrichment import ingest_injuries, ingest_lineups
+        lineups = p.fetch_lineups(day)
+        players = ingest_lineups(s, "apifootball", lineups)
+        injuries = p.fetch_injuries(day)
+        n_inj = ingest_injuries(s, "apifootball", injuries)
+        from .ingest.consistency import run_consistency
+        run_consistency(s)
+        print(json.dumps({"day": day, **rep.as_dict(),
+                          "lineup_players": players, "injuries": n_inj},
+                         ensure_ascii=False, indent=2))
+    except Exception as exc:
+        print(json.dumps({"day": day, "error": f"{type(exc).__name__}: {exc}"},
+                         ensure_ascii=False, indent=2))
+    finally:
+        s.close()
+    return 0
+
+
+def cmd_ingest_oddsapi(_args) -> int:
+    """P5 : cotes live multi-bookmakers via The Odds API (clé GRATUITE)."""
+    from .providers import odds_api as oapi
+    if not oapi.available():
+        print(json.dumps({"error": "MISSING DEPENDENCY : ODDS_API_KEY absente "
+                                   "(clé gratuite à créer sur the-odds-api.com)"},
+                         ensure_ascii=False, indent=2))
+        return 1
+    p = oapi.OddsApiProvider()
+    s = _session()
+    try:
+        events = p.fetch()
+        from .ingest.service import attach_odds_to_fixture
+        matched = unmatched = new_snaps = 0
+        for ev in events:
+            home, away, kickoff, odds = p.parse_odds(ev)
+            if not odds:
+                continue
+            fx = p.match_fixture(s, home, away, kickoff)
+            if fx is None:
+                unmatched += 1
+                continue
+            matched += 1
+            new_snaps += attach_odds_to_fixture(s, fx, odds, "oddsapi")
+        s.commit()
+        print(json.dumps({"events": len(events), "matched": matched,
+                          "unmatched": unmatched, "new_snapshots": new_snaps},
+                         ensure_ascii=False, indent=2))
+    except Exception as exc:
+        print(json.dumps({"error": f"{type(exc).__name__}: {exc}"}, ensure_ascii=False, indent=2))
+    finally:
+        s.close()
+    return 0
+
+
+def cmd_backtest(args) -> int:
+    """§35/§36 : backtest walk-forward (Brier/LogLoss, modèle vs marché)."""
+    from .ml.backtest import run_backtest
+    s = _session()
+    rep = run_backtest(s, min_history=args.min_history)
+    print(json.dumps(rep, ensure_ascii=False, indent=2))
+    return 0
+
+
 def cmd_status(_args) -> int:
     s = _session()
     n_fixtures = s.query(Fixture).count()
@@ -387,6 +465,19 @@ def main() -> int:
     sp = sub.add_parser("compute-predictions", help="M4 : Poisson/Dixon-Coles/Elo + Value Bets")
     sp.add_argument("--competition", default=None)
     sp.set_defaults(fn=cmd_predictions)
+
+    sp = sub.add_parser("ingest-apifootball",
+                        help="P4 : compositions + blessures (API-Football, clé gratuite)")
+    sp.add_argument("--date", default=None, help="YYYY-MM-DD, défaut : aujourd'hui")
+    sp.set_defaults(fn=cmd_ingest_apifootball)
+
+    sp = sub.add_parser("ingest-oddsapi",
+                        help="P5 : cotes live multi-bookmakers (The Odds API, clé gratuite)")
+    sp.set_defaults(fn=cmd_ingest_oddsapi)
+
+    sp = sub.add_parser("backtest", help="§35/§36 : backtest walk-forward + calibration")
+    sp.add_argument("--min-history", type=int, default=30)
+    sp.set_defaults(fn=cmd_backtest)
 
     sp = sub.add_parser("status"); sp.set_defaults(fn=cmd_status)
 

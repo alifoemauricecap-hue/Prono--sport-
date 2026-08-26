@@ -14,6 +14,8 @@ from .openligadb import PROVIDER as OLDB
 from .openligadb import OpenLigaDBProvider
 from .thesportsdb import PROVIDER as TSDB
 from .thesportsdb import TheSportsDBProvider
+from .api_football import PROVIDER as AFOOT, ApiFootballProvider
+from .odds_api import PROVIDER as ODDSAPI, OddsApiProvider
 
 PROVIDERS: dict[str, type[Provider]] = {
     FDUK: FootballDataUKProvider,
@@ -21,6 +23,8 @@ PROVIDERS: dict[str, type[Provider]] = {
     OLDB: OpenLigaDBProvider,
     TSDB: TheSportsDBProvider,
     FDORG: FootballDataOrgProvider,
+    AFOOT: ApiFootballProvider,
+    ODDSAPI: OddsApiProvider,
 }
 
 # Métadonnées déclaratives — insérées dans data_sources au bootstrap.
@@ -30,6 +34,8 @@ DATA_SOURCES: list[dict] = [
     {"name": OLDB, "kind": "football_data", "base_url": "https://api.openligadb.de"},
     {"name": TSDB, "kind": "football_data+media", "base_url": "https://www.thesportsdb.com/api/v1/json"},
     {"name": FDORG, "kind": "football_data", "base_url": "https://api.football-data.org/v4"},
+    {"name": AFOOT, "kind": "football_data+lineups+players", "base_url": "https://v3.football.api-sports.io"},
+    {"name": ODDSAPI, "kind": "odds", "base_url": "https://api.the-odds-api.com/v4"},
 ]
 
 

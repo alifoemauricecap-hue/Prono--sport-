@@ -143,13 +143,10 @@ class EspnProvider(Provider):
         params = {"limit": str(limit)}
         if date:
             params["dates"] = date  # format YYYYMMDD — une requête par jour
-        r = httpx.get(
-            self.scoreboard_url(league),
-            params=params,
-            timeout=HTTP_TIMEOUT_SECONDS,
-        )
-        r.raise_for_status()
-        return r.json()
+        from ..providers.cache import http_get_json
+        data, _origin = http_get_json(self.scoreboard_url(league), params=params,
+                                      ttl_seconds=90)
+        return data
 
     def parse(self, payload: dict, league: str, source_url: str | None = None) -> Iterable[RawFixture]:
         canon_code, comp_name, area = LEAGUES.get(league, (f"ESPN-{league}", league, None))

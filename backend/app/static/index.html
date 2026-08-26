@@ -2,615 +2,95 @@
 <html lang="fr">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>PRONO SPORT — Analyse Football Mondiale</title>
-<style>
-  :root {
-    --bg: #0a0f14; --bg2: #101820; --card: #141e28; --card2: #19242f;
-    --line: #223141; --txt: #e8f0f2; --muted: #8ba3b0;
-    --green: #00dc82; --green-dim: #0a3d28; --amber: #ffb020; --red: #ff5252;
-    --blue: #35a7ff; --violet: #b58cff;
-  }
-  * { margin: 0; padding: 0; box-sizing: border-box; }
-  body { background: var(--bg); color: var(--txt); font: 15px/1.45 system-ui, 'Segoe UI', sans-serif; }
-  .brand { display: flex; align-items: center; gap: 12px; padding: 18px 22px 8px; }
-  .logo { width: 40px; height: 40px; border-radius: 10px;
-    background: radial-gradient(circle at 30% 30%, #00dc82, #007844 70%);
-    display: flex; align-items: center; justify-content: center; font-size: 22px; font-weight: 900; color: #04281a; }
-  h1 { font-size: 20px; letter-spacing: 3px; font-weight: 800; }
-  h1 span { color: var(--green); }
-  .tagline { color: var(--muted); font-size: 11px; letter-spacing: 1.6px; text-transform: uppercase; }
-  .sources-bar { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 22px 4px; }
-  .src { font-size: 10px; letter-spacing: .8px; padding: 3px 9px; border-radius: 20px;
-    background: var(--bg2); border: 1px solid var(--line); color: var(--muted); }
-  .src.ok { color: var(--green); border-color: var(--green-dim); }
-  .tabs { display: flex; gap: 4px; padding: 16px 22px 0; border-bottom: 1px solid var(--line); overflow-x: auto; }
-  .tab { padding: 10px 20px; cursor: pointer; color: var(--muted); border: none; background: none;
-    font-size: 13px; font-weight: 700; letter-spacing: 1.2px; border-bottom: 3px solid transparent; white-space: nowrap; }
-  .tab.active { color: var(--txt); border-bottom-color: var(--green); }
-  .tab .n { background: var(--card2); border-radius: 12px; padding: 1px 8px; font-size: 11px; margin-left: 6px; }
-  .comp-filter { padding: 12px 22px; display: flex; gap: 6px; flex-wrap: wrap; }
-  .cmp { font-size: 11px; padding: 5px 12px; border-radius: 6px; cursor: pointer;
-    background: var(--card); border: 1px solid var(--line); color: var(--muted); }
-  .cmp.active { color: var(--green); border-color: var(--green); }
-  #list { padding: 6px 22px 30px; max-width: 860px; margin: 0 auto; }
-  .day-head { color: var(--muted); font-size: 11px; letter-spacing: 1.5px; text-transform: uppercase; margin: 18px 0 8px; }
-  .card { background: linear-gradient(180deg, var(--card), var(--card2)); border: 1px solid var(--line);
-    border-radius: 14px; padding: 14px 16px; margin-bottom: 10px; transition: transform .12s; }
-  .card:hover { transform: translateY(-1px); border-color: #2e455a; }
-  .card-top { display: flex; justify-content: space-between; font-size: 11px; color: var(--muted); margin-bottom: 10px; }
-  .comp-name { letter-spacing: .6px; }
-  .row { display: grid; grid-template-columns: 1fr auto 1fr; align-items: start; gap: 10px; }
-  .team { display: flex; align-items: center; gap: 10px; min-width: 0; }
-  .team.away { flex-direction: row-reverse; text-align: right; }
-  .tname { font-weight: 650; font-size: 14.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .badge { width: 34px; height: 34px; border-radius: 50%; background: var(--bg2); border: 1px solid var(--line);
-    display: flex; align-items: center; justify-content: center; overflow: hidden; flex-shrink: 0; }
-  .badge img { width: 26px; height: 26px; object-fit: contain; }
-  .badge .ini { font-size: 12px; font-weight: 800; color: var(--muted); }
-  .score { font-size: 21px; font-weight: 800; letter-spacing: 1px; text-align: center; min-width: 74px; }
-  .score .vs { color: var(--muted); font-size: 13px; font-weight: 600; }
-  .status { display: inline-block; margin-top: 4px; font-size: 10px; font-weight: 700; letter-spacing: 1px;
-    padding: 3px 9px; border-radius: 20px; }
-  .st-FINISHED { background: #10261d; color: #63d69e; }
-  .st-SCHEDULED, .st-UPCOMING { background: #12202e; color: var(--blue); }
-  .st-LIVE, .st-HALFTIME { background: #3a1215; color: var(--red); animation: pulse 1.6s infinite; }
-  .st-POSTPONED, .st-CANCELLED { background: #2c2410; color: var(--amber); }
-  @keyframes pulse { 50% { opacity: .55; } }
-  .card-foot { display: flex; align-items: center; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
-  .verif { font-size: 10px; font-weight: 700; letter-spacing: .8px; padding: 3px 8px; border-radius: 5px; }
-  .v-VERIFIED { background: var(--green-dim); color: var(--green); }
-  .v-UNVERIFIED { background: #2c2410; color: var(--amber); }
-  .v-CONTRADICTORY { background: #3a1215; color: var(--red); }
-  .prov { font-size: 10px; color: var(--muted); background: var(--bg2); border: 1px solid var(--line);
-    padding: 2px 7px; border-radius: 5px; }
-  .prov b { color: var(--txt); font-weight: 600; }
-  .meta { font-size: 11px; color: var(--muted); margin-left: auto; }
-  .empty, .err { text-align: center; color: var(--muted); padding: 60px 20px; font-size: 14px; }
-  .err { color: var(--red); }
-  footer { text-align: center; color: #556; font-size: 10.5px; padding: 26px 10px; letter-spacing: .6px; }
-  .fresh { padding: 4px 22px; color: var(--muted); font-size: 11px; }
-  .daybar { display: flex; align-items: center; gap: 8px; padding: 8px 22px; }
-  .day-nav { background: var(--card); border: 1px solid var(--line); color: var(--txt);
-    border-radius: 8px; padding: 5px 12px; cursor: pointer; font-size: 12px; font-weight: 700; }
-  .day-nav:hover { border-color: var(--green); }
-  .day-label { color: var(--green); font-size: 13px; font-weight: 700; min-width: 150px; text-align: center; }
-  .elo-chip { font-size: 10px; font-weight: 800; color: var(--violet); background: #1c1430;
-    border: 1px solid #33254f; padding: 2px 7px; border-radius: 5px; }
-  .fchip { display: inline-block; width: 13px; height: 13px; line-height: 13px; text-align: center;
-    font-size: 9px; font-weight: 800; border-radius: 3px; margin-right: 2px; }
-  .fW { background: #093d26; color: var(--green); }
-  .fD { background: #262c33; color: var(--muted); }
-  .fL { background: #3a1215; color: var(--red); }
-  .prob-bar { display: flex; height: 15px; border-radius: 4px; overflow: hidden; margin-top: 8px; font-size: 9px; font-weight: 800; }
-  .prob-bar > div { display: flex; align-items: center; justify-content: center; color: #04101a; overflow: hidden; white-space: nowrap; }
-  .ph { background: #00dc82; } .pd { background: #7d93a1; } .pa { background: #35a7ff; }
-  .prob-lab { display: flex; justify-content: space-between; font-size: 9.5px; color: var(--muted); margin-top: 3px; }
-  .vb { font-size: 10px; font-weight: 800; padding: 3px 9px; border-radius: 5px; letter-spacing: .5px; }
-  .vb-STRONG { background: #00dc82; color: #04331f; }
-  .vb-QUALIFIED { background: #0a3d28; color: #00dc82; border: 1px solid #00dc82; }
-  .vb-POTENTIAL { background: #2c2410; color: var(--amber); }
-  .vb-none { background: #14181f; color: var(--muted); border: 1px dashed var(--line); font-size: 10px; padding: 3px 8px; border-radius: 5px; }
-  .vb-disclaimer { background: #171207; border: 1px solid var(--amber); color: var(--amber);
-    font-size: 11.5px; padding: 10px 14px; border-radius: 8px; margin: 10px 0 14px; line-height: 1.5; }
-  .vbrow { display: flex; align-items: center; gap: 14px; background: var(--card); border: 1px solid var(--line);
-    border-radius: 10px; padding: 12px 16px; margin-bottom: 8px; flex-wrap: wrap; }
-  .vbrow .col-l { flex: 1.4; min-width: 200px; }
-  .vbrow .teams { font-weight: 800; font-size: 14px; }
-  .vbrow .cmeta { font-size: 11px; color: var(--muted); margin-top: 2px; }
-  .vbrow .pick { font-size: 15px; font-weight: 900; white-space: nowrap; }
-  .vbrow .nums { display: flex; gap: 12px; font-size: 11px; color: var(--muted); flex-wrap: wrap; }
-  .vbrow .nums b { color: var(--fg); font-size: 13px; }
-  .vbrow .ev { font-weight: 900; font-size: 15px; color: #00dc82; white-space: nowrap; }
-  .liveclock { font-size: 11px; font-weight: 900; color: #ff4d4d; margin-top: 2px; animation: pulse 1.6s infinite; }
-  @keyframes pulse { 50% { opacity: .55; } }
-  .trend { font-size: 10.5px; color: var(--muted); margin-top: 4px; letter-spacing: .3px; }
-  .inplay { font-size: 10.5px; color: var(--amber); margin-top: 6px; font-weight: 700; }
-  .inplay-bar { margin-top: 3px; }
-  .card { cursor: pointer; transition: border-color .15s; }
-  .card:hover { border-color: var(--acc); }
-  /* ---------- fiche match M7 ---------- */
-  .sheet-back { position: fixed; inset: 0; background: rgba(4,6,10,.78); z-index: 40; display: none; }
-  .sheet { position: fixed; inset: 4% 6%; background: var(--bg2); border: 1px solid var(--line);
-    border-radius: 14px; z-index: 41; display: none; overflow-y: auto; padding: 22px 26px; }
-  .sheet.open, .sheet-back.open { display: block; }
-  .sheet h2 { margin: 0 0 2px; font-size: 20px; }
-  .sheet .sub { color: var(--muted); font-size: 12px; margin-bottom: 14px; }
-  .sheet .close { position: absolute; top: 14px; right: 18px; background: none; border: 1px solid var(--line);
-    color: var(--fg); border-radius: 8px; padding: 4px 12px; cursor: pointer; font-size: 13px; }
-  .g2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 22px; }
-  .g2 .box, .box.full { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; }
-  .box.full { grid-column: 1 / -1; }
-  .box h3 { margin: 0 0 8px; font-size: 12px; text-transform: uppercase; letter-spacing: 1px; color: var(--acc); }
-  .box table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
-  .box td, .box th { padding: 3px 4px; text-align: left; }
-  .box th { color: var(--muted); font-weight: 600; font-size: 11px; }
-  .dq-bar { height: 8px; border-radius: 4px; background: var(--line); overflow: hidden; margin-top: 6px; }
-  .dq-fill { height: 100%; background: linear-gradient(90deg, var(--acc), #00dc82); }
-  @media (max-width: 760px) { .g2 { grid-template-columns: 1fr; } .sheet { inset: 3% 3%; } }
-  /* ---------- chat M8 ---------- */
-  #chat-fab { position: fixed; right: 20px; bottom: 20px; z-index: 30; background: var(--acc);
-    color: #04121f; font-weight: 900; border: none; border-radius: 50px; padding: 13px 20px;
-    font-size: 14px; cursor: pointer; box-shadow: 0 6px 24px rgba(0,180,255,.35); }
-  #chat { position: fixed; right: 20px; bottom: 76px; width: 360px; max-width: 92vw; height: 480px;
-    max-height: 70vh; background: var(--bg2); border: 1px solid var(--line); border-radius: 14px;
-    z-index: 35; display: none; flex-direction: column; }
-  #chat.open { display: flex; }
-  #chat .head { padding: 12px 14px; border-bottom: 1px solid var(--line); font-weight: 800; font-size: 13.5px; }
-  #chat .head span { color: var(--muted); font-weight: 500; font-size: 11px; display: block; }
-  #chat-log { flex: 1; overflow-y: auto; padding: 12px; }
-  .msg { margin-bottom: 10px; font-size: 13px; line-height: 1.5; white-space: pre-wrap; }
-  .msg.user { text-align: right; }
-  .msg.user .bub { background: var(--acc); color: #04121f; }
-  .msg .bub { display: inline-block; background: var(--card); border: 1px solid var(--line);
-    border-radius: 10px; padding: 8px 12px; max-width: 88%; text-align: left; }
-  .msg .srcs { color: var(--muted); font-size: 10px; margin-top: 3px; }
-  #chat form { display: flex; gap: 6px; padding: 10px; border-top: 1px solid var(--line); }
-  #chat input { flex: 1; background: var(--card); border: 1px solid var(--line); border-radius: 8px;
-    color: var(--fg); padding: 9px 12px; font-size: 13px; }
-  #chat button.send { background: var(--acc); border: none; color: #04121f; font-weight: 800;
-    border-radius: 8px; padding: 0 16px; cursor: pointer; }
-  .lglogo { width: 18px; height: 18px; object-fit: contain; vertical-align: -4px; margin-right: 5px; }
-</style>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="description" content="PRONO SPORT — Plateforme professionnelle d'intelligence football. Les données d'abord. Les modèles ensuite. La décision en dernier.">
+<title>PRONO SPORT — Intelligence Football</title>
+<link rel="stylesheet" href="/static/style.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⚽</text></svg>">
 </head>
 <body>
-  <div class="brand">
-    <div class="logo">P2</div>
-    <div>
-      <h1>PRONO <span>SPORT</span> 2.0</h1>
-      <div class="tagline">55 championnats · 6 sources publiques · Elo & forme calculés sur données réelles</div>
+
+<!-- ============================ BARRE SUPÉRIEURE ============================ -->
+<header class="topbar">
+  <div class="topbar-left">
+    <span class="logo">⚽ PRONO&nbsp;SPORT</span>
+    <span class="tagline">Les données d'abord.</span>
+  </div>
+  <div class="topbar-center">
+    <div class="searchbox">
+      <input id="global-search" type="search" placeholder="Rechercher : équipe, compétition, match…" autocomplete="off">
+      <kbd>↵</kbd>
     </div>
   </div>
-  <div class="sources-bar" id="sources"></div>
-  <div class="tabs">
-    <button class="tab" data-tab="live">EN DIRECT<span class="n" id="n-live">0</span></button>
-    <button class="tab active" data-tab="upcoming">À VENIR<span class="n" id="n-upcoming">0</span></button>
-    <button class="tab" data-tab="finished">TERMINÉS<span class="n" id="n-finished">0</span></button>
-    <button class="tab" data-tab="valuebets">VALUE BETS<span class="n" id="n-valuebets">0</span></button>
+  <div class="topbar-right">
+    <span id="live-indicator" class="live-indicator hidden">● EN DIRECT</span>
+    <button id="notif-btn" class="icon-btn" title="Notifications">🔔<span id="notif-count" class="badge-count hidden">0</span></button>
   </div>
-  <div class="daybar" id="daybar">
-    <button class="day-nav" id="day-prev">◀</button>
-    <span class="day-label" id="day-label">Aujourd'hui</span>
-    <button class="day-nav" id="day-next">▶</button>
-    <button class="day-nav" id="day-today">AUJ.'</button>
-    <button class="day-nav" id="day-all">TOUT</button>
+</header>
+
+<!-- ============================ NAVIGATION ============================ -->
+<nav class="mainnav" id="mainnav">
+  <a href="#/accueil" data-nav="accueil">🏠 Accueil</a>
+  <a href="#/live" data-nav="live">🔴 Live</a>
+  <a href="#/avenir" data-nav="avenir">📅 À venir</a>
+  <a href="#/termines" data-nav="termines">✅ Terminés</a>
+  <a href="#/competitions" data-nav="competitions">🏆 Compétitions</a>
+  <a href="#/equipes" data-nav="equipes">🛡 Équipes</a>
+  <a href="#/pronostics" data-nav="pronostics">🎯 Pronostics</a>
+  <a href="#/value" data-nav="value">💎 Value Bets</a>
+  <a href="#/analyses" data-nav="analyses">📊 Analyses</a>
+  <a href="#/assistant" data-nav="assistant">🤖 Assistant</a>
+</nav>
+<nav class="bottomnav" id="bottomnav">
+  <a href="#/accueil" data-nav="accueil"><span>🏠</span>Accueil</a>
+  <a href="#/live" data-nav="live"><span>🔴</span>Live</a>
+  <a href="#/avenir" data-nav="avenir"><span>📅</span>À venir</a>
+  <a href="#/value" data-nav="value"><span>💎</span>Value</a>
+  <a href="#/analyses" data-nav="analyses"><span>📊</span>Plus</a>
+</nav>
+
+<!-- ============================ CONTENU ============================ -->
+<main id="view" class="view" aria-live="polite">
+  <div class="loading"><div class="spinner"></div><p>Chargement des données réelles…</p></div>
+</main>
+
+<!-- ============================ MODALE FICHE MATCH ============================ -->
+<div id="match-modal" class="modal hidden" role="dialog" aria-modal="true">
+  <div class="modal-backdrop" data-close></div>
+  <div class="modal-card">
+    <button class="modal-close" data-close title="Fermer">✕</button>
+    <div id="mc-header" class="mc-header"></div>
+    <div class="mc-tabs" id="mc-tabs">
+      <button data-tab="apercu" class="active">Aperçu</button>
+      <button data-tab="pronos">Pronos</button>
+      <button data-tab="cotes">Cotes</button>
+      <button data-tab="analyse">Analyse</button>
+    </div>
+    <div id="mc-body" class="mc-body"></div>
   </div>
-  <div class="comp-filter" id="comps"></div>
-  <div class="fresh" id="fresh"></div>
-  <div id="list"><div class="empty">Chargement…</div></div>
-  <div class="sheet-back" id="sheet-back"></div>
-  <div class="sheet" id="sheet"></div>
-  <button id="chat-fab">💬 Assistant</button>
-  <div id="chat"><div class="head">Assistant PRONO SPORT
-      <span>Réponses construites uniquement sur les données réelles — jamais inventées (§1)</span></div>
-    <div id="chat-log"></div>
-    <form id="chat-form"><input id="chat-in" placeholder="ex. prono Arsenal vs Chelsea · value bets · forme de PSG" autocomplete="off"><button class="send" type="submit">➤</button></form>
+</div>
+
+<!-- ============================ MODALE NOTIFICATIONS ============================ -->
+<div id="notif-modal" class="modal small hidden">
+  <div class="modal-backdrop" data-close-notif></div>
+  <div class="modal-card notif-card">
+    <div class="notif-head">
+      <strong>Notifications</strong>
+      <button class="icon-btn" data-close-notif title="Fermer">✕</button>
+    </div>
+    <div id="notif-list" class="notif-list"></div>
   </div>
-  <footer>PRONO SPORT — moteur d'analyse probabiliste · sources : football-data.co.uk · ESPN · OpenLigaDB · TheSportsDB
-  · données non garanties · chaque carte indique son niveau de vérification</footer>
+</div>
 
-<script>
-const $ = s => document.querySelector(s);
-// Par défaut : les matchs d'AUJOURD'HUI (navigation J±N ensuite)
-let state = { tab: 'upcoming', comp: '', date: new Date().toISOString().slice(0, 10) };
+<!-- Toasts -->
+<div id="toasts" class="toasts"></div>
 
-function dayLabel() {
-  if (!state.date) return 'Toutes dates';
-  const today = new Date(new Date().toISOString().slice(0, 10));
-  const d = new Date(state.date);
-  const diff = Math.round((d - today) / 86400000);
-  const base = d.toLocaleDateString('fr-FR', {weekday: 'short', day: 'numeric', month: 'short'});
-  if (diff === 0) return "Aujourd'hui · " + base;
-  if (diff === 1) return 'Demain · ' + base;
-  if (diff === -1) return 'Hier · ' + base;
-  return (diff > 0 ? 'J+' + diff : 'J' + diff) + ' · ' + base;
-}
-function shiftDate(delta) {
-  const base = state.date ? new Date(state.date) : new Date();
-  base.setDate(base.getDate() + delta);
-  state.date = base.toISOString().slice(0, 10);
-  refreshDaybar(); refresh();
-}
-function setToday() {
-  state.date = new Date().toISOString().slice(0, 10);
-  refreshDaybar(); refresh();
-}
-function setAll() { state.date = null; refreshDaybar(); refresh(); }
-function refreshDaybar() {
-  $('#day-label').textContent = dayLabel();
-  $('#daybar').style.display = (state.tab === 'live' || state.tab === 'valuebets') ? 'none' : 'flex';
-}
+<footer class="footer">
+  <p>PRONO SPORT 3.0 — Plateforme d'intelligence football sur données réelles 100 % gratuites.</p>
+  <p class="disclaimer">⚠️ Probabilité ≠ certitude. Aucune donnée inventée : chaque valeur porte sa source
+  (<b>SOURCE</b> / <b>CALCULÉ</b> / <b>MODÈLE</b>) ; l'absence est affichée « DONNÉE INDISPONIBLE ».</p>
+</footer>
 
-const ini = n => (n || '?').split(' ').map(w => w[0]).join('').slice(0, 3).toUpperCase();
-const badge = t => t.logo_url
-  ? `<span class="badge"><img src="${t.logo_url}" onerror="this.outerHTML='<span class=badge><span class=ini>${ini(t.name)}</span></span>'"></span>`
-  : `<span class="badge"><span class="ini">${ini(t.name)}</span></span>`;
-const stLabel = { SCHEDULED:'PROGRAMMÉ', UPCOMING:'À VENIR', LIVE:'EN DIRECT', HALFTIME:'MI-TEMPS',
-  FINISHED:'TERMINÉ', POSTPONED:'REPORTÉ', CANCELLED:'ANNULÉ', EXTRA_TIME:'PROLONG.', PENALTIES:'T.A.B.',
-  UNKNOWN:'INCONNU', SUSPENDED:'SUSPENDU', ABANDONED:'ABANDONNÉ',
-  LINEUPS_PENDING:'COMPO ATTENDUE', LINEUPS_CONFIRMED:'COMPO OFFICIELLE' };
-const vTxt = f => f.data_status === 'VERIFIED'
-  ? `✓ VÉRIFIÉ · ${f.n_sources} SOURCE${f.n_sources > 1 ? 'S' : ''}`
-  : f.data_status === 'CONTRADICTORY' ? '✕ SOURCES CONTRADICTOIRES'
-  : '⚠ 1 SEULE SOURCE';
-
-function formHtml(f5) {
-  if (!f5) return '';
-  return [...f5].map(c => `<span class="fchip f${c}">${c}</span>`).join('');
-}
-
-function teamHtml(t, side) {
-  const elo = t.elo != null ? `<span class="elo-chip" title="Elo calculé sur ${t.elo_matches} matchs réels">ELO ${Math.round(t.elo)}</span>` : '';
-  const form = t.form5 ? `<span title="5 derniers matchs, plus récent à gauche">${formHtml(t.form5)}</span>` : '';
-  const meta = (elo || form) ? `<div style="display:flex;gap:6px;margin-top:3px;justify-content:${side==='away'?'flex-end':'flex-start'}">${elo}${form}</div>` : '';
-  return `<div class="team ${side}">${badge(t)}<div><div class="tname">${t.name}</div>${meta}</div></div>`;
-}
-
-function scoreHtml(f) {
-  const st = f.status;
-  let mid;
-  if (st === 'FINISHED' || st === 'LIVE' || st === 'HALFTIME' || st === 'EXTRA_TIME' || st === 'PENALTIES')
-    mid = `${f.score.ft_home ?? '–'}<span class="vs"> : </span>${f.score.ft_away ?? '–'}`;
-  else if (st === 'POSTPONED' || st === 'CANCELLED') mid = `<span class="vs">—</span>`;
-  else mid = `<span class="vs">vs</span>`;
-  let extra = '';
-  if (st === 'FINISHED' && f.score.ht_home != null)
-    extra = `<div style="font-size:10px;color:var(--muted);margin-top:2px">mi-temps ${f.score.ht_home}-${f.score.ht_away}</div>`;
-  // M6 : minute réelle du provider en cours de match (jamais estimée silencieusement)
-  if ((st === 'LIVE' || st === 'HALFTIME') && f.clock)
-    extra += `<div class="liveclock">● ${st === 'HALFTIME' ? 'MT' : f.clock}</div>`;
-  return `<div class="score">${mid}<br><span class="status st-${st}">${stLabel[st] || st}</span>${extra}</div>`;
-}
-
-function trendHtml(f) {
-  const t = f.odds_trend;
-  if (!t || !(t.H || t.D || t.A)) return '';
-  const arrow = v => v > 0 ? `<span style="color:#00dc82">↗+${v.toFixed(1)}</span>`
-    : v < 0 ? `<span style="color:var(--bad)">↘${v.toFixed(1)}</span>` : `<span style="color:var(--muted)">→0</span>`;
-  return `<div class="trend" title="Mouvement du marché depuis la 1re observation (${t.snapshots} relevés réels) — points de %">
-    marché&nbsp;: 1 ${arrow(t.H)} · N ${arrow(t.D)} · 2 ${arrow(t.A)}</div>`;
-}
-
-function inplayHtml(f) {
-  if (!f.inplay) return '';
-  const p = f.inplay['1X2'], pc = v => (v * 100).toFixed(0) + '%';
-  return `<div class="inplay" title="${f.inplay.disclaimer}">
-      <b>EN DIRECT — projection score final</b> · le + probable : ${f.inplay.most_likely_final}
-    </div>
-    <div class="prob-bar inplay-bar">
-      <div class="ph" style="width:${p.H * 100}%">${p.H >= .2 ? '1 ' + pc(p.H) : ''}</div>
-      <div class="pd" style="width:${p.D * 100}%">${p.D >= .16 ? 'N ' + pc(p.D) : ''}</div>
-      <div class="pa" style="width:${p.A * 100}%">${p.A >= .2 ? '2 ' + pc(p.A) : ''}</div>
-    </div>`;
-}
-
-function srcHtml(f) {
-  return f.sources.map(s => {
-    const sc = s.score_home != null ? ` ${s.score_home}-${s.score_away}` : '';
-    return `<span class="prov" title="MAJ : ${s.last_updated_at}"><b>${s.provider}</b> ${s.status}${sc}</span>`;
-  }).join('');
-}
-
-function probHtml(f) {
-  const p = f.prediction && f.prediction.ensemble;
-  if (!p) return '';
-  const pc = v => (v * 100).toFixed(0) + '%';
-  return `<div class="prob-bar" title="Ensemble Dixon-Coles + Elo · historique ${f.prediction.history_matches} matchs · ≠ certitude">
-      <div class="ph" style="width:${p.H * 100}%">${p.H >= .22 ? '1 ' + pc(p.H) : ''}</div>
-      <div class="pd" style="width:${p.D * 100}%">${p.D >= .16 ? 'N ' + pc(p.D) : ''}</div>
-      <div class="pa" style="width:${p.A * 100}%">${p.A >= .22 ? '2 ' + pc(p.A) : ''}</div>
-    </div>
-    <div class="prob-lab"><span>xG modèle ${f.prediction.expected_goals.home} — ${f.prediction.expected_goals.away}</span>
-    <span>P1 ${pc(f.prediction.dc_1x2.H)} / N ${pc(f.prediction.dc_1x2.D)} / P2 ${pc(f.prediction.dc_1x2.A)}</span></div>`;
-}
-
-function vbHtml(f) {
-  if (f.status !== 'SCHEDULED' && f.status !== 'UPCOMING') return '';
-  const bp = f.best_pick;
-  if (!bp) {
-    if (f.prediction) return `<span class="vb-none">NO QUALIFIED PICK</span>`;
-    return '';
-  }
-  const sel = {H:'1', D:'N', A:'2'}[bp.selection] || bp.selection;
-  return `<span class="vb vb-${bp.level}" title="p modèle ${(bp.p_model*100).toFixed(0)}% · p marché ${(bp.p_fair*100).toFixed(0)}% · cote réelle ${bp.bookmaker}">
-      ${bp.level === 'STRONG' ? '★ STRONG VALUE' : bp.level === 'QUALIFIED' ? '◆ VALUE' : '○ POTENTIEL'}
-      · ${sel} @ ${bp.odds.toFixed(2)} · edge +${bp.edge_pts}pts</span>`;
-}
-
-function cardHtml(f) {
-  const ko = new Date(f.kickoff_utc);
-  const time = f.kickoff_time_known ? ko.toLocaleTimeString('fr-FR', {hour:'2-digit',minute:'2-digit'}) : 'heure NC';
-  const xg = (f.xg.home != null) ? ` · xG ${Number(f.xg.home).toFixed(1)}–${Number(f.xg.away).toFixed(1)}` : '';
-  const lg = f.competition.logo_url ? `<img class="lglogo" src="${f.competition.logo_url}" onerror="this.remove()">` : '';
-  return `<div class="card" onclick="openSheet(${f.id})" title="Cliquer pour la fiche analyse complète">
-    <div class="card-top">
-      <span class="comp-name">${lg}${f.competition.name} · ${f.competition.area || ''}</span>
-      <span>${time}${f.venue ? ' · ' + f.venue : ''}</span>
-    </div>
-    <div class="row">${teamHtml(f.home,'home')}${scoreHtml(f)}${teamHtml(f.away,'away')}</div>
-    ${probHtml(f)}
-    ${inplayHtml(f)}
-    ${trendHtml(f)}
-    <div class="card-foot">
-      <span class="verif v-${f.data_status}">${vTxt(f)}</span>
-      ${vbHtml(f)}
-      ${srcHtml(f)}
-      <span class="meta">${f.referee ? 'arbitre : ' + f.referee : ''}${xg}</span>
-    </div>
-  </div>`;
-}
-
-async function loadTab(tab, renderCounters) {
-  const w = { live:'#n-live', upcoming:'#n-upcoming', finished:'#n-finished' }[tab];
-  try {
-    const url = '/v1/fixtures?tab=' + tab
-      + (state.comp ? '&competition=' + state.comp : '')
-      + (state.date ? '&date=' + state.date : '')
-      + '&limit=500';
-    const r = await fetch(url); const d = await r.json();
-    window['data_' + tab] = d;
-    $(w).textContent = d.count;
-    if (renderCounters) renderCards();
-  } catch (e) { /* réseau indisponible → on garde l'existant */ }
-}
-
-// ---------- VALUE BETS (§83-85 : page dédiée, jamais de promesse §38) ----------
-const vbLevelTxt = { STRONG: '★ STRONG VALUE', QUALIFIED: '◆ VALUE QUALIFIÉE', POTENTIAL: '○ POTENTIEL' };
-const selTxt = { H: 'Victoire 1', D: 'Nul', A: 'Victoire 2', Over: '+2,5 buts', Under: '-2,5 buts' };
-
-function vbRowHtml(v) {
-  const ko = new Date(v.kickoff_utc);
-  const when = ko.toLocaleDateString('fr-FR', {weekday:'short', day:'numeric', month:'short'})
-    + ' · ' + ko.toLocaleTimeString('fr-FR', {hour:'2-digit', minute:'2-digit'});
-  return `<div class="vbrow">
-    <span class="vb vb-${v.level}">${vbLevelTxt[v.level] || v.level}</span>
-    <div class="col-l"><div class="teams">${v.home} — ${v.away}</div>
-      <div class="cmeta">${v.competition} · ${when}</div></div>
-    <div class="pick">${selTxt[v.selection] || v.selection} <span style="color:var(--amber)">@ ${v.odds_reference.toFixed(2)}</span></div>
-    <div class="nums">
-      <span>P modèle<br><b>${(v.p_model * 100).toFixed(0)}%</b></span>
-      <span>P marché<br><b>${(v.p_market_fair * 100).toFixed(0)}%</b></span>
-      <span>edge<br><b>+${v.edge_pts} pts</b></span>
-      <span>confiance<br><b>${v.confidence}</b></span>
-      <span>bookmaker<br><b>${v.bookmaker}</b></span>
-    </div>
-    <div class="ev">EV +${v.ev_pct}%</div>
-  </div>`;
-}
-
-function renderValueBets() {
-  const d = window.data_valuebets;
-  if (!d) return;
-  $('#fresh').textContent = d.count + ' value bet(s) sur cotes réelles · marchés 1X2 · marge retirée (§32) · ≠ garantie (§38)';
-  let html = `<div class="vb-disclaimer"><b>${d.disclaimer || 'Moteur probabiliste — jamais de garantie.'}</b><br>
-    Rappel méthode : probabilité du modèle (Dixon-Coles × Elo, historique réel) × cote réelle − 1 = EV.
-    Niveaux : POTENTIEL EV ≥ +1 % · QUALIFIÉE EV ≥ +3 % + robustesse · STRONG EV ≥ +8 % + robustesse.
-    Absence de pari = NO QUALIFIED PICK (non listé, par conception §37).</div>`;
-  if (!d.value_bets.length) html += '<div class="empty">Aucune value bet qualifiée pour l\'instant — NO QUALIFIED PICK (§37/§85)</div>';
-  else html += d.value_bets.map(vbRowHtml).join('');
-  $('#list').innerHTML = html;
-}
-
-async function loadValueBets() {
-  try {
-    const d = (typeof EMBED !== 'undefined' && EMBED.value_bets)
-      ? EMBED.value_bets
-      : await (await fetch('/v1/value-bets?limit=200')).json();
-    window.data_valuebets = d;
-    $('#n-valuebets').textContent = d.count;
-  } catch (e) { /* réseau indisponible → on garde l'existant */ }
-}
-
-function renderCards() {
-  if (state.tab === 'valuebets') { renderValueBets(); return; }
-  const d = window['data_' + state.tab];
-  if (!d) return;
-  $('#fresh').textContent = d.count + ' match(s) · données générées à ' +
-    new Date(d.generated_at).toLocaleString('fr-FR');
-  if (!d.fixtures.length) { $('#list').innerHTML = '<div class="empty">Aucun match — DONNÉE NON DISPONIBLE</div>'; return; }
-  let html = '', lastDay = '';
-  for (const f of d.fixtures) {
-    const day = new Date(f.kickoff_utc).toLocaleDateString('fr-FR', {weekday:'long', day:'numeric', month:'long'});
-    if (day !== lastDay) { html += `<div class="day-head">${day}</div>`; lastDay = day; }
-    html += cardHtml(f);
-  }
-  $('#list').innerHTML = html;
-}
-
-async function refresh() {
-  await Promise.all([loadTab('live', false), loadTab('upcoming', false), loadTab('finished', false), loadValueBets()]);
-  renderCards();
-}
-
-async function boot() {
-  try {
-    const [c, h] = await Promise.all([fetch('/v1/competitions'), fetch('/v1/health/providers')]);
-    const comps = (await c.json()).competitions.filter(x => x.fixtures > 0);
-    $('#comps').innerHTML = `<span class="cmp active" data-c="">TOUS</span>` +
-      comps.map(x => `<span class="cmp" data-c="${x.code}">${x.name} (${x.fixtures})</span>`).join('');
-    $('#sources').innerHTML = 'SOURCES LIVE : ' + (await h.json()).providers
-      .map(p => `<span class="src ${p.status==='OK'?'ok':''}">${p.provider} · ${p.status} · ${p.latency_ms ?? '—'} ms</span>`).join('');
-    document.querySelectorAll('.cmp').forEach(el => el.onclick = () => {
-      document.querySelectorAll('.cmp').forEach(x => x.classList.remove('active'));
-      el.classList.add('active'); state.comp = el.dataset.c; refresh();
-    });
-  } catch(e) {}
-  refresh(); setInterval(refresh, 60000);
-}
-
-// ---------- M7 : fiche match expert ----------
-function pct(v) { return (v * 100).toFixed(0) + '%'; }
-
-async function openSheet(fixtureId) {
-  let d = null;
-  if (typeof EMBED !== 'undefined' && EMBED.reports) d = EMBED.reports[fixtureId] || null;
-  if (!d) {
-    try { d = await (await fetch('/v1/fixtures/' + fixtureId + '/analysis')).json(); }
-    catch (e) { return; }
-  }
-  if (!d || d.error) return;
-  const f = d.fixture;
-  const t = d.team_analytics || {}, p = d.prediction;
-  const ens = p && p.probabilities ? (p.probabilities['1X2_ensemble'] || p.probabilities['1X2']) : null;
-  const ou = p && p.probabilities ? p.probabilities['OU_2.5'] : null;
-  const bt = p && p.probabilities ? p.probabilities['BTTS'] : null;
-  const tops = p && p.probabilities ? (p.probabilities.top_scores || []) : [];
-  const m1 = (d.market_now || {})['1X2'], mou = (d.market_now || {})['OU_2.5'];
-  const w = d.weather, h2h = d.h2h || {count: 0, meetings: [], tally: {}};
-  const dq = d.data_quality_score;
-  const vbRows = (d.value_bets || []).map(v =>
-    `<tr><td>${v.market}</td><td>${selTxt[v.selection] || v.selection}</td><td>@${v.odds}</td>
-     <td>+${v.edge_pts} pts</td><td>EV +${v.ev_pct}%</td><td><span class="vb vb-${v.level}">${v.level}</span></td></tr>`).join('');
-  $('#sheet').innerHTML = `
-    <button class="close" onclick="closeSheet()">✕ fermer</button>
-    <h2>${f.home} <span style="color:var(--muted)">vs</span> ${f.away}</h2>
-    <div class="sub">${f.competition} · ${new Date(f.kickoff_utc).toLocaleString('fr-FR')} ·
-      ${f.venue || 'stade NC'}${f.venue_city ? ' (' + f.venue_city + ')' : ''} · ${stLabel[f.status] || f.status}
-      ${f.referee ? ' · arbitre : ' + f.referee : ''} · ${f.data_status === 'VERIFIED' ? '✓ VÉRIFIÉ' : '⚠ 1 source'}</div>
-    <div class="g2">
-      ${ens ? `<div class="box"><h3>Prédiction (modèle ensemble)</h3>
-        <table><tr><th>1</th><th>N</th><th>2</th><th>+2,5</th><th>-2,5</th>${bt ? '<th>BTTS oui</th>' : ''}</tr>
-        <tr><td><b>${pct(ens.H)}</b></td><td>${pct(ens.D)}</td><td><b>${pct(ens.A)}</b></td>
-        <td>${ou ? pct(ou.Over) : '—'}</td><td>${ou ? pct(ou.Under) : '—'}</td>${bt ? `<td>${pct(bt.Yes)}</td>` : ''}</tr></table>
-        <div style="font-size:11px;color:var(--muted);margin-top:6px">buts attendus ${p.expected_goals.home}–${p.expected_goals.away}
-        · historique ${p.input_snapshot?.history_matches ?? '?'} matchs · scores + probables :
-        ${tops.slice(0,3).map(s => s.score + ' ' + pct(s.p)).join(', ')}</div></div>`
-      : `<div class="box"><h3>Prédiction</h3><div style="color:var(--muted);font-size:12.5px">
-         Historique insuffisant → PAS DE PRÉDICTION (§82 — jamais de chiffre inventé)</div></div>`}
-      <div class="box"><h3>Marché actuel ${d.market_captured_at ? '· cotes réelles au ' + new Date(d.market_captured_at).toLocaleString('fr-FR') : ''}</h3>
-        ${m1 ? `<table><tr><th></th><th>1</th><th>N</th><th>2</th></tr>
-          <tr><td style="color:var(--muted)">meilleure cote</td>${['H','D','A'].map(s => m1.best[s] ? `<td>${m1.best[s].odds.toFixed(2)} <span style="color:var(--muted);font-size:10px">${m1.best[s].bookmaker}</span></td>` : '<td>—</td>').join('')}</tr>
-          <tr><td style="color:var(--muted)">P fair (marge retirée)</td>${['H','D','A'].map(s => m1.fair_consensus[s] != null ? `<td>${pct(m1.fair_consensus[s])}</td>` : '<td>—</td>').join('')}</tr></table>`
-        : '<div style="color:var(--muted);font-size:12.5px">Aucune cote réelle disponible pour ce match — DONNÉE NON DISPONIBLE</div>'}
-        ${mou ? `<div style="font-size:11px;color:var(--muted);margin-top:6px">O/U 2,5 : Over ${mou.fair_consensus.Over != null ? pct(mou.fair_consensus.Over) : '—'} · ${mou.n_bookmakers} bookmakers</div>` : ''}
-        ${d.odds_trend ? `<div class="trend">tendance depuis 1re obs. : 1 ${d.odds_trend.H > 0 ? '↗+' + d.odds_trend.H : '↘' + d.odds_trend.H} · N ${d.odds_trend.D > 0 ? '↗+' + d.odds_trend.D : '↘' + d.odds_trend.D} · 2 ${d.odds_trend.A > 0 ? '↗+' + d.odds_trend.A : '↘' + d.odds_trend.A} pts</div>` : ''}
-      </div>
-      <div class="box"><h3>État des équipes (réel)</h3>
-        <table><tr><th></th><th>Elo</th><th>forme (5)</th><th>rendement buts*</th></tr>
-        <tr><td>${f.home}</td><td>${t.home?.elo ?? 'NC'}</td><td>${t.home?.form5 ?? 'NC'}</td><td>${t.home ? (t.home.gf5 ?? '—') + '/' + (t.home.ga5 ?? '—') : 'NC'}</td></tr>
-        <tr><td>${f.away}</td><td>${t.away?.elo ?? 'NC'}</td><td>${t.away?.form5 ?? 'NC'}</td><td>${t.away ? (t.away.gf5 ?? '—') + '/' + (t.away.ga5 ?? '—') : 'NC'}</td></tr></table>
-        <div style="font-size:11px;color:var(--muted);margin-top:4px">* marqués/encaissés en moyenne pondérée sur 5 matchs (les récents comptent plus)</div>
-        <div style="font-size:11px;color:var(--muted);margin-top:2px">échantillon : ${t.home?.matches_rated ?? 0} / ${t.away?.matches_rated ?? 0} matchs notés</div></div>
-      <div class="box"><h3>Confrontations directes (historique réel)</h3>
-        ${h2h.count ? `<div style="font-size:12.5px;margin-bottom:5px">${h2h.tally.home_wins} victoire(s) ${f.home} · ${h2h.tally.draws} nul(s) · ${h2h.tally.away_wins} victoire(s) ${f.away}</div>
-        <table>${h2h.meetings.slice(0, 6).map(m => `<tr><td>${m.date}</td><td>${m.score}</td><td>${m.result_for_first_team === '1' ? f.home : m.result_for_first_team === '2' ? f.away : 'nul'}</td></tr>`).join('')}</table>`
-        : `<div style="color:var(--muted);font-size:12.5px">${h2h.note || 'DONNÉE NON DISPONIBLE'}</div>`}</div>
-      <div class="box"><h3>Météo du stade</h3>
-        ${w ? `<table><tr><th>température</th><th>pluie</th><th>proba pluie</th><th>vent</th></tr>
-          <tr><td>${w.temperature_c ?? '—'} °C</td><td>${w.precipitation_mm ?? '—'} mm</td>
-          <td>${w.precipitation_prob_pct ?? '—'} %</td><td>${w.wind_kmh ?? '—'} km/h</td></tr></table>
-          <div style="font-size:11px;color:var(--muted);margin-top:6px">${w.city} · ${w.source} · relevé pour ${w.forecast_for} UTC</div>`
-        : '<div style="color:var(--muted);font-size:12.5px">Ville du stade inconnue ou hors horizon prévision → DONNÉE NON DISPONIBLE</div>'}</div>
-      ${(d.value_bets || []).length ? `<div class="box full"><h3>Value bets détectées (cotes réelles)</h3>
-        <table><tr><th>marché</th><th>sélection</th><th>cote</th><th>edge</th><th>EV</th><th>niveau</th></tr>${vbRows}</table></div>` : ''}
-      <div class="box full"><h3>Qualité & auditabilité des données (§48)</h3>
-        <div style="font-size:12px">score <b>${dq} / 100</b> — ${Object.entries(d.data_availability).filter(([k, v]) => v).map(([k]) => k).join(' · ')}</div>
-        <div class="dq-bar"><div class="dq-fill" style="width:${dq}%"></div></div>
-        <div style="font-size:11px;color:var(--muted);margin-top:6px">${d.model_uncertainty || 'Une probabilité reste une probabilité — jamais une certitude (§38).'}</div></div>
-    </div>`;
-  $('#sheet').classList.add('open'); $('#sheet-back').classList.add('open');
-}
-
-function closeSheet() {
-  $('#sheet').classList.remove('open'); $('#sheet-back').classList.remove('open');
-}
-
-// ---------- M8 : chat ----------
-let chatBooted = false;
-function chatAdd(txt, who, srcs) {
-  const div = document.createElement('div');
-  div.className = 'msg ' + who;
-  div.innerHTML = `<span class="bub">${txt.replace(/\*\*(.+?)\*\*/g, '<b>$1</b>')}</span>` +
-    (srcs ? `<div class="srcs">sources : ${srcs.join(' · ')}</div>` : '');
-  $('#chat-log').appendChild(div);
-  $('#chat-log').scrollTop = 1e9;
-}
-async function chatAsk(q) {
-  chatAdd(q, 'user');
-  try {
-    const d = await (await fetch('/v1/chat?q=' + encodeURIComponent(q))).json();
-    chatAdd(d.answer || '(pas de réponse)', 'bot', d.sources);
-  } catch (e) {
-    chatAdd("Mode hors-ligne : je n'ai accès qu'aux données encapsulées de cet instantané.", 'bot');
-  }
-}
-
-$('#chat-fab').onclick = () => {
-  $('#chat').classList.toggle('open');
-  if (!chatBooted) { chatBooted = true;
-    chatAdd("Salut, Boss 👊 Pose-moi une question sur les données RÉELLES : « value bets », « prono X vs Y », « forme de X », « prochains matchs de X »…", 'bot',
-      ["fixtures", "predictions", "value_bets"]); }
-};
-$('#chat-form').onsubmit = e => { e.preventDefault();
-  const q = $('#chat-in').value.trim(); if (!q) return;
-  $('#chat-in').value = ''; chatAsk(q); };
-$('#sheet-back').onclick = closeSheet;
-
-// ---------- LÉGENDE des insignes ----------
-const LEGEND_HTML = `
-  <button class="close" onclick="closeSheet()">✕ fermer</button>
-  <h2>❔ Légende des insignes</h2>
-  <div class="sub">Chaque signe vient d'une donnée RÉELLE ou d'un calcul documenté — aucun décor inventé.</div>
-  <div class="g2">
-    <div class="box"><h3>Fiabilité de la donnée (§1)</h3>
-      <table>
-        <tr><td><span class="verif v-VERIFIED">✓ VÉRIFIÉ · n SOURCES</span></td><td>≥ 2 sources indépendantes rapportent le même match, scores concordants (ESPN + football-data.co.uk, …).</td></tr>
-        <tr><td><span class="verif v-UNVERIFIED">⚠ 1 SEULE SOURCE</span></td><td>Une seule source a rapporté ce match : information utilisable mais non recoupée.</td></tr>
-        <tr><td><span class="verif v-CONTRADICTORY">✕ SOURCES CONTRADICTOIRES</span></td><td>Les sources ne donnent pas le même score → analyse limitée, signalé au lieu de deviner.</td></tr>
-      </table></div>
-    <div class="box"><h3>Statut du match</h3>
-      <table>
-        <tr><td><span class="status st-SCHEDULED">PROGRAMMÉ</span> / <span class="status st-UPCOMING">À VENIR</span></td><td>coup d'envoi pas encore donné.</td></tr>
-        <tr><td><span class="status st-LIVE">EN DIRECT</span> <span class="liveclock">● 67'</span></td><td>match en cours — minute réelle du rapporteur.</td></tr>
-        <tr><td><span class="status st-HALFTIME">MI-TEMPS</span> / <span class="status st-FINISHED">TERMINÉ</span></td><td>pause / résultat final officiel.</td></tr>
-        <tr><td><span class="status st-POSTPONED">REPORTÉ</span> <span class="status st-CANCELLED">ANNULÉ</span> <span class="status st-UNKNOWN">INCONNU</span></td><td>reporté · annulé · statut non vérifié (jamais deviné).</td></tr>
-      </table></div>
-    <div class="box"><h3>Chips d'équipe (calculés sur données réelles)</h3>
-      <table>
-        <tr><td><span class="elo-chip">ELO 1750</span></td><td>force de l'équipe calculée par notre Elo interne (K=60, avantage domicile 65 pts) sur ses matchs réels en base. Plus c'est haut, plus l'équipe est forte <i>selon l'historique</i>.</td></tr>
-        <tr><td><span class="fchip fW">V</span><span class="fchip fD">N</span><span class="fchip fL">D</span></td><td>5 derniers matchs, le plus récent à gauche : Victoire / Nul / Défaite (résultats réels).</td></tr>
-      </table></div>
-    <div class="box"><h3>Probabilités & value (§32-38)</h3>
-      <table>
-        <tr><td><span class="vb vb-STRONG">★ STRONG VALUE</span></td><td>EV ≥ +8 % + filtres de robustesse (historique suffisant, modèles concordants).</td></tr>
-        <tr><td><span class="vb vb-QUALIFIED">◆ VALUE</span></td><td>EV ≥ +3 % + robustesse — value qualifiée.</td></tr>
-        <tr><td><span class="vb vb-POTENTIAL">○ POTENTIEL</span></td><td>EV ≥ +1 % mais robustesse incomplète — simple signal.</td></tr>
-        <tr><td><span class="vb-none">NO QUALIFIED PICK</span></td><td>Le marché est efficient : le moteur REFUSE de forcer un pari (§37).</td></tr>
-        <tr><td class="trend">marché : 1 ↗+3.2 · N →0 · 2 ↘-2.1</td><td>mouvement des probabilités implicites (points de %) depuis la 1re observation des cotes réelles.</td></tr>
-        <tr><td>xG modèle 1.6—1.0</td><td>buts attendus par le moteur (≠ xG mesuré du match, indiqué séparément quand la source le fournit).</td></tr>
-      </table></div>
-    <div class="box"><h3>En dessous de chaque carte</h3>
-      <table>
-        <tr><td><span class="prov"><b>espn</b> FINISHED 2-1</span></td><td>ce que rapporte chaque source (nom, statut, score, heure) — transparence totale.</td></tr>
-        <tr><td>clic sur la carte</td><td>ouvre la <b>fiche analyse complète</b> : prédiction détaillée, marché actuel, confrontations, météo du stade, score qualité /100.</td></tr>
-      </table></div>
-    <div class="box"><h3>Avertissement permanent</h3>
-      <div style="font-size:12.5px;line-height:1.6">★/◆/○ sont des <b>signaux probabilistes</b> calculés sur cotes réelles,
-      <b>jamais des certitudes ni des conseils garantis</b> (§38/§86). Un match reste imprévisible.</div></div>
-  </div>`;
-
-document.getElementById('legend-btn').onclick = () => {
-  $('#sheet').innerHTML = LEGEND_HTML;
-  $('#sheet').classList.add('open'); $('#sheet-back').classList.add('open');
-};
-
-document.querySelectorAll('.tab:not(#legend-btn)').forEach(el => el.onclick = () => {
-  document.querySelectorAll('.tab').forEach(x => x.classList.remove('active'));
-  el.classList.add('active'); state.tab = el.dataset.tab; refreshDaybar(); renderCards();
-});
-$('#day-prev').onclick = () => shiftDate(-1);
-$('#day-next').onclick = () => shiftDate(1);
-$('#day-today').onclick = setToday;
-$('#day-all').onclick = setAll;
-refreshDaybar();
-boot();
-</script>
-</body>
-</html>
-day;
-$('#day-all').onclick = setAll;
-refreshDaybar();
-boot();
-</script>
+<script src="/static/app.js"></script>
 </body>
 </html>

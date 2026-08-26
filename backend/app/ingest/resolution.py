@@ -40,6 +40,13 @@ ALIAS_SEEDS: dict[str, str] = {
     "sheffield weds": "sheffield wednesday",
     "cardiff": "cardiff city",
     "norwich": "norwich city",
+    # espagne (fduk → noms complets)
+    "ath madrid": "atletico madrid",
+    "atletico": "atletico madrid",
+    "ath bilbao": "athletic club",
+    "athletic bilbao": "athletic club",
+    "la coruna": "deportivo la coruna",
+    "dep la coruna": "deportivo la coruna",
 }
 
 

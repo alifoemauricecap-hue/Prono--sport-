@@ -1,7 +1,8 @@
 #!/bin/sh
-# PRONO SPORT 2.0 — bootstrap universel (Koyeb / HF Spaces / VPS / Termux).
-# Remplit la base depuis les sources publiques (0 €), calcule analytics + pronos.
-# Idempotent : relançable sans casse. || true = une source KO n'arrête jamais le tout (§64).
+# PRONO SPORT 3.0 — bootstrap universel (Koyeb / HF Spaces / VPS / Termux).
+# Remplit la base depuis les sources publiques (0 €), calcule analytics + pronos,
+# contrôle les sources (discoverSources). Idempotent : relançable sans casse.
+# || true = une source KO n'arrête jamais le tout (§64).
 cd "$(dirname "$0")"
 export PYTHONIOENCODING=utf-8
 
