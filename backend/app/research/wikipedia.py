@@ -119,14 +119,67 @@ def context_for_team(team_name: str) -> dict | None:
     return wikipedia_summary(team_name, "en")
 
 
-def context_for_competition(comp_name: str, season_label: str | None = None) -> dict | None:
-    """Contexte d'une compétition (option. saison)."""
+_FOOTBALL_TITLE_HINTS = ("football", "soccer", "ligue")
+_FOOTBALL_TEXT_HINTS = ("football", "soccer", "championnat", "championship",
+                        "association football", "coupe")
+
+
+def _is_football_article(title: str, extract: str) -> bool:
+    """Un article de ligue de football porte des marques football dans son
+    titre ou son extrait (élimine fléchettes, basket, réunions…)."""
+    t = (title or "").lower()
+    x = (extract or "").lower()
+    return any(k in t for k in _FOOTBALL_TITLE_HINTS) or \
+        any(k in x for k in _FOOTBALL_TEXT_HINTS)
+
+
+def _score_hit(hit_title: str, s: dict | None, country: str | None) -> int:
+    """Score de pertinence d'un hit opensearch pour une ligue de football."""
+    if not s or not s.get("extract"):
+        return -1
+    score = 0
+    t = (hit_title or "").lower()
+    if any(k in t for k in _FOOTBALL_TITLE_HINTS):
+        score += 3
+    if _is_football_article(hit_title, s["extract"]):
+        score += 2
+    if country and (country.lower() in t or country.lower() in (s.get("extract") or "").lower()):
+        score += 2
+    return score
+
+
+def competition_context(comp_name: str, season_label: str | None = None,
+                        country: str | None = None) -> dict | None:
+    """Contexte d'une compétition (option. saison/pays) — robuste aux homonymies.
+
+    Stratégie (0 €, sources publiques) :
+    1. résumé direct « {nom} {saison} » puis « {nom} » (FR → EN),
+       filtré : l'article doit bien être du football (sinon homonymie)
+    2. opensearch « {nom} {pays} » puis « {nom} » : le hit le mieux scoré
+       (marques football + pays) gagne (ex. « Premier League (football) »).
+    """
     candidates = []
     if season_label:
         candidates.append(f"{comp_name} {season_label}")
     candidates.append(comp_name)
     for c in candidates:
-        s = wikipedia_summary(c, "fr") or wikipedia_summary(c, "en")
-        if s and s.get("extract"):
-            return s
-    return None
+        for lang in ("fr", "en"):
+            s = wikipedia_summary(c, lang)
+            if s and s.get("extract") and _is_football_article(c, s["extract"]):
+                return s
+    best, best_score = None, 1
+    for query in ([f"{comp_name} {country}"] if country else []) + [comp_name]:
+        for lang in ("fr", "en"):
+            for hit in search_wikipedia(query, lang, limit=5):
+                if hit["title"] == comp_name:
+                    continue  # homonymie probable → articles spécialisés
+                s = wikipedia_summary(hit["title"], lang)
+                sc = _score_hit(hit["title"], s, country)
+                if sc > best_score:
+                    best, best_score = s, sc
+    return best
+
+
+def context_for_competition(comp_name: str, season_label: str | None = None) -> dict | None:
+    """Contexte d'une compétition (option. saison) — alias de competition_context."""
+    return competition_context(comp_name, season_label)

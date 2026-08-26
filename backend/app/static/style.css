@@ -277,3 +277,21 @@ a.fx-link { color: var(--text); font-weight: 600; }
   padding: 6px 12px; border-radius: 8px; cursor: pointer; font-size: 13px; text-transform: capitalize;
 }
 .admin-tabs button.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+
+/* ---------------- Monde (couverture mondiale) + Recherche ligue ---------------- */
+.world-list { display: flex; flex-direction: column; }
+.world-row {
+  display: flex; justify-content: space-between; align-items: center; gap: 8px;
+  padding: 6px 0; border-bottom: 1px solid var(--border); font-size: 13.5px;
+}
+.world-row:last-child { border-bottom: none; }
+.wname { display: flex; flex-wrap: wrap; gap: 4px; }
+.wmeta { display: flex; align-items: center; gap: 8px; white-space: nowrap; }
+.mini-btn { padding: 3px 8px; font-size: 12px; }
+.research-body { padding: 18px; }
+.research-thumb { max-width: 120px; max-height: 90px; border-radius: 8px; margin-bottom: 10px; }
+.research-extract {
+  background: var(--bg, #0d1117); border: 1px solid var(--border); border-radius: 10px;
+  padding: 12px; font-size: 13.5px; line-height: 1.55; margin: 10px 0;
+  max-height: 320px; overflow-y: auto; white-space: pre-wrap;
+}

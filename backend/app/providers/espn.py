@@ -16,71 +16,12 @@ from .base import Provider, RawFixture, TeamRef
 PROVIDER = "espn"
 BASE = "https://site.api.espn.com/apis/site/v2/sports/soccer"
 
-# Ligues mondiales ESPN VÉRIFIÉES en direct le 2026-08-24 :
-# slug ESPN → (code canonique interne, nom d'affichage, zone)
-LEAGUES: dict[str, tuple[str, str, str]] = {
-    # Angleterre
-    "eng.1": ("ENG-E0", "Premier League", "Angleterre"),
-    "eng.2": ("ENG-E1", "Championship", "Angleterre"),
-    "eng.3": ("ENG-E2", "League One", "Angleterre"),
-    "eng.4": ("ENG-E3", "League Two", "Angleterre"),
-    "eng.5": ("ENG-EC", "National League", "Angleterre"),
-    "eng.fa": ("ENG-FA", "FA Cup", "Angleterre"),
-    "eng.league_cup": ("ENG-LC", "Carabao Cup", "Angleterre"),
-    # Espagne / Allemagne / Italie / France
-    "esp.1": ("ESP-SP1", "La Liga", "Espagne"),
-    "esp.2": ("ESP-SP2", "La Liga 2", "Espagne"),
-    "ger.1": ("GER-D1", "Bundesliga", "Allemagne"),
-    "ger.2": ("GER-D2", "2. Bundesliga", "Allemagne"),
-    "ita.1": ("ITA-I1", "Serie A", "Italie"),
-    "ita.2": ("ITA-I2", "Serie B", "Italie"),
-    "fra.1": ("FRA-F1", "Ligue 1", "France"),
-    "fra.2": ("FRA-F2", "Ligue 2", "France"),
-    # Autres championnats européens
-    "por.1": ("POR-P1", "Primeira Liga", "Portugal"),
-    "ned.1": ("NED-N1", "Eredivisie", "Pays-Bas"),
-    "tur.1": ("TUR-T1", "Süper Lig", "Turquie"),
-    "bel.1": ("BEL-B1", "Pro League", "Belgique"),
-    "sco.1": ("SCO-SC0", "Premiership", "Écosse"),
-    "sui.1": ("SUI-1", "Super League", "Suisse"),
-    "gre.1": ("GRE-G1", "Super League", "Grèce"),
-    "aut.1": ("AUT-1", "Bundesliga", "Autriche"),
-    "den.1": ("DEN-1", "Superliga", "Danemark"),
-    "nor.1": ("NOR-1", "Eliteserien", "Norvège"),
-    "swe.1": ("SWE-1", "Allsvenskan", "Suède"),
-    "cze.1": ("CZE-1", "Championnat tchèque", "Tchéquie"),
-    "rou.1": ("ROU-1", "Liga 1", "Roumanie"),
-    # Amériques
-    "usa.1": ("USA-MLS", "MLS", "États-Unis"),
-    "mex.1": ("MEX-1", "Liga MX", "Mexique"),
-    "arg.1": ("ARG-1", "Liga Profesional", "Argentine"),
-    "bra.1": ("BRA-1", "Série A", "Brésil"),
-    "bra.2": ("BRA-2", "Série B", "Brésil"),
-    "col.1": ("COL-1", "Primera A", "Colombie"),
-    "chi.1": ("CHI-1", "Primera División", "Chili"),
-    "uru.1": ("URU-1", "Liga AUF", "Uruguay"),
-    "ecu.1": ("ECU-1", "LigaPro", "Équateur"),
-    "per.1": ("PER-1", "Liga 1", "Pérou"),
-    "ven.1": ("VEN-1", "Primera División", "Venezuela"),
-    # Asie / Océanie
-    "ksa.1": ("KSA-1", "Saudi Pro League", "Arabie Saoudite"),
-    "jpn.1": ("JPN-1", "J.League", "Japon"),
-    "chn.1": ("CHN-1", "Super League", "Chine"),
-    "aus.1": ("AUS-1", "A-League", "Australie"),
-    "ind.1": ("IND-1", "Super League", "Inde"),
-    # Coupes internationales
-    "uefa.champions": ("UEFA-UCL", "Ligue des Champions", "Europe"),
-    "uefa.europa": ("UEFA-UEL", "Ligue Europa", "Europe"),
-    "conmebol.libertadores": ("CONMEBOL-LIB", "Copa Libertadores", "Amérique du Sud"),
-    "conmebol.sudamericana": ("CONMEBOL-SUD", "Copa Sudamericana", "Amérique du Sud"),
-    "concacaf.champions": ("CONCACAF-CCL", "Champions Cup", "CONCACAF"),
-    "fifa.worldq.uefa": ("FIFA-WCQ-UEFA", "Qualif. Coupe du Monde UEFA", "Monde"),
-    "fifa.worldq.caf": ("FIFA-WCQ-CAF", "Qualif. Coupe du Monde CAF", "Afrique"),
-    "fifa.worldq.conmebol": ("FIFA-WCQ-CONMEBOL", "Qualif. Coupe du Monde CONMEBOL", "Amérique du Sud"),
-    "fifa.worldq.concacaf": ("FIFA-WCQ-CONCACAF", "Qualif. Coupe du Monde CONCACAF", "CONCACAF"),
-    "fifa.worldq.afc": ("FIFA-WCQ-AFC", "Qualif. Coupe du Monde AFC", "Asie"),
-    "fifa.friendly": ("FIFA-FRIENDLY", "Matchs amicaux internationaux", "Monde"),
-}
+# Catalogue mondial unique : voir app/world.py (slugs VÉRIFIÉS 2026-08-24/26,
+# confédérations, niveaux). Couplé au backbone TheSportsDB `eventsday` qui couvre
+# TOUTES les autres ligues du monde en 1 requête/jour (0 €).
+from ..world import espn_leagues_dict
+
+LEAGUES: dict[str, tuple[str, str, str]] = espn_leagues_dict()
 
 # Sous-ensemble rafraîchi automatiquement (cyclet live) ; le reste via CLI world.
 AUTO_WATCH_LEAGUES = [

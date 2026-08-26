@@ -22,7 +22,7 @@ from pathlib import Path
 
 from fastapi import FastAPI, Header, Query
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from sqlalchemy.orm import Session, joinedload
 
 from .config import DATABASE_URL
@@ -502,6 +502,97 @@ def list_competitions() -> JSONResponse:
         return JSONResponse({"competitions": out})
 
 
+@app.get("/v1/world")
+def world_coverage() -> JSONResponse:
+    """COUVERTURE MONDIALE — catalogue des ligues + état RÉEL de la base par ligue.
+
+    Architecture 0 € : catalogue ESPN (haute qualité) + backbone TheSportsDB
+    `eventsday` (TOUS les matchs du monde en 1 requête/jour) + fduk (historique
+    profond). Chaque ligue affiche sa couverture réelle — jamais supposée.
+    """
+    from sqlalchemy import func
+    from .world import WORLD_LEAGUES, CONFEDERATIONS
+    with SF() as s:
+        from sqlalchemy import select
+        comps = {c.code: c for c in s.query(Competition).all()}
+        # compteurs réels par compétition (select + group_by explicite)
+        counts = {code: n for code, n in s.execute(
+            select(Competition.code, func.count(Fixture.id))
+            .join(Fixture, Fixture.competition_id == Competition.id)
+            .group_by(Competition.code)).all()}
+        from .db.models import LeagueResearch
+        research_done = {r[0] for r in
+                         s.query(LeagueResearch.competition_id).distinct().all()}
+
+        def comp_payload(meta, comp) -> dict:
+            in_db = comp is not None
+            n = counts.get(meta.code, 0)
+            return {
+                "code": meta.code, "name": meta.name, "country": meta.country,
+                "conf": meta.conf, "level": meta.level, "espn": meta.espn,
+                "verified": meta.status,
+                "in_db": in_db,
+                "fixtures": n,
+                "research": ("OK" if (in_db and comp.id in research_done)
+                             else ("POSSIBLE" if in_db else "PENDING")),
+            }
+
+        # 1) ligues du catalogue (ESPN)
+        leagues = [comp_payload(m, comps.get(m.code)) for m in WORLD_LEAGUES]
+        # 2) compétitions présentes en base MAIS hors catalogue (légues découvertes
+        #    par le backbone world TSDB / fduk) — elles font partie de la couverture
+        extra = []
+        for code, comp in sorted(comps.items()):
+            if code not in {m.code for m in WORLD_LEAGUES}:
+                extra.append(comp_payload(
+                    type("M", (), {"code": code, "name": comp.name,
+                                   "country": comp.area or "?", "conf": "AUTRE",
+                                   "level": 1, "espn": None, "status": "DÉCOUVERTE"})(),
+                    comp))
+        out = leagues + extra
+        by_conf: dict[str, int] = {}
+        for o in out:
+            by_conf[o["conf"]] = by_conf.get(o["conf"], 0) + 1
+        return JSONResponse({
+            "leagues": out,
+            "extra_competitions": [o["code"] for o in extra],
+            "totals": {
+                "catalog": len(leagues),
+                "covered": sum(1 for o in out if o["in_db"] and o["fixtures"] > 0),
+                "fixtures": sum(counts.values()),
+                "competitions_in_db": len(comps),
+            },
+            "by_confederation": {c: by_conf.get(c, 0) for c in CONFEDERATIONS}
+                               | {k: v for k, v in by_conf.items() if k not in CONFEDERATIONS},
+            "backbone_world": "TheSportsDB eventsday (toutes les ligues du monde, 1 requête/jour, 0 €)",
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+        })
+
+
+@app.get("/v1/competitions/{code}/research")
+def competition_research(code: str, refresh: bool = False) -> JSONResponse:
+    """Recherche approfondie d'une LIGUE (Wikipedia FR/EN, CC BY-SA, 0 €).
+
+    SOURCE → dossier réel (titre, extrait, article, licence) ·
+    UNAVAILABLE → « DONNÉE INDISPONIBLE » (réseau coupé ou article absent).
+    """
+    from .research.league import league_research
+    with SF() as s:
+        comp = s.query(Competition).filter_by(code=code).one_or_none()
+        if comp is None:
+            # ligue du catalogue pas encore en base → on crée la compétition
+            # (code canonique) pour pouvoir rattacher la recherche
+            from .world import code_meta
+            meta = code_meta(code)
+            if meta is None:
+                return JSONResponse({"error": f"compétition inconnue: {code}"}, status_code=404)
+            comp = Competition(code=meta.code, name=meta.name, area=meta.country)
+            s.add(comp)
+            s.commit()
+        s.refresh(comp)
+        return JSONResponse(league_research(s, comp, refresh=refresh))
+
+
 @app.get("/v1/teams/{team_id}")
 def get_team(team_id: int) -> JSONResponse:
     with SF() as s:
@@ -843,9 +934,8 @@ def prediction_results(limit: int = Query(50, le=500)) -> JSONResponse:
 
 
 @app.get("/v1/events")
-async def sse_events() -> "StreamingResponse":
+async def sse_events() -> StreamingResponse:
     """Temps réel : pousse buts, statuts, value bets, sources, jobs (SSE)."""
-    from fastapi.responses import StreamingResponse
     q = BUS.subscribe()
 
     async def gen():
@@ -900,6 +990,7 @@ def admin_sync(worker: str, x_admin_token: str | None = Header(default=None, ali
         "syncFixtures": lambda s: W.run_fixtures(s),
         "syncLiveMatches": lambda s: W.run_live(s),
         "syncResults": lambda s: W.run_results(s),
+        "syncWorldDaily": lambda s: W.run_world_daily(s),
         "syncLineups": lambda s: W.run_lineups(s),
         "syncOddsLive": lambda s: W.run_odds_live(s),
         "syncWeather": lambda s: W.run_weather(s),
@@ -1110,6 +1201,22 @@ async def _auto_ingest_loop() -> None:  # pragma: no cover - boucle de fond
             pass  # §64 : un échec de cycle ne doit jamais tuer le serveur
 
 
+async def _world_daily_loop() -> None:  # pragma: no cover - backbone mondial 1 h
+    from .workers.definitions import run_world_daily
+    interval = int(os.environ.get("WORLD_SECONDS", "3600"))
+    await asyncio.sleep(90)  # laisse le bootstrap respirer
+    while True:
+        try:
+            def _w() -> dict:
+                with SF() as s:
+                    return run_world_daily(s)
+            res = await asyncio.to_thread(_w)
+            emit("SYNC_DONE", worker="syncWorldDaily", result=res)
+        except Exception:
+            pass  # §64 : un échec ne doit jamais tuer le serveur
+        await asyncio.sleep(interval)
+
+
 async def _live_fast_loop() -> None:  # pragma: no cover - M6 : rafraîchissement LIVE rapide
     interval = int(os.environ.get("AUTO_LIVE_SECONDS", "75"))
     while True:
@@ -1198,6 +1305,8 @@ async def startup() -> None:  # pragma: no cover
     await asyncio.to_thread(_ensure)
     if os.environ.get("AUTO_INGEST") == "1":
         asyncio.create_task(_auto_ingest_loop())
+        # backbone MONDIAL : tous les matchs du monde (TSDB eventsday), 1 h
+        asyncio.create_task(_world_daily_loop())
         if os.environ.get("AUTO_LIVE", "1") == "1":
             asyncio.create_task(_live_fast_loop())
         if os.environ.get("AUTO_COMPUTE", "1") == "1":

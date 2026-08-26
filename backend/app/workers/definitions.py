@@ -26,6 +26,7 @@ WORKERS: dict[str, str] = {
     "syncLiveMatches": "P1 — matchs en direct (75 s)",
     "syncFixtures": "P2 — nouveaux/changements de matchs (5 min)",
     "syncResults": "P3 — résultats + cotes closing (5 min)",
+    "syncWorldDaily": "P2b — backbone MONDIAL : tous les matchs du jour (TSDB eventsday, 1 h)",
     "syncLineups": "P4 — compositions + blessures (API-Football free, 45 min)",
     "syncOdds": "P5 — cotes actuelles fduk fixtures.csv (15 min)",
     "syncOddsLive": "P5 — cotes live multi-books (The Odds API free, 3 h)",
@@ -121,6 +122,50 @@ def run_fixtures(session: Session) -> dict:
             rejected=rejected, latency_ms=latency)
     return {"worker": "syncFixtures", "created": created, "updated": updated,
             "rejected": rejected}
+
+
+def run_world_daily(session: Session) -> dict:
+    """P2b — syncWorldDaily : backbone MONDIAL (TheSportsDB eventsday).
+
+    2 requêtes (aujourd'hui + hier) = TOUS les matchs du monde de ces jours,
+    toutes ligues confondues — y compris celles hors catalogue ESPN (Afrique,
+    Moyen-Orient, divisions lointaines). Idempotent, journalisé, tolérant aux
+    erreurs (§64). C'est lui qui garantit « toutes les ligues du monde » à 0 €.
+    """
+    from datetime import date, timedelta
+    from ..ingest.service import IngestReport, ingest_one
+    t0 = time.perf_counter()
+    provider = get_provider("tsdb")
+    created = updated = rejected = 0
+    days_hit: list[str] = []
+    for i in (0, 1):  # aujourd'hui + hier
+        day = (date.today() - timedelta(days=i)).isoformat()
+        try:
+            payload = provider._get("eventsday.php", {"d": day, "s": "Soccer"})
+            events = payload.get("events") or []
+            report = IngestReport(provider="tsdb")
+            for e in events:
+                raws = list(provider.parse(
+                    {"events": [e]},
+                    league_id=str(e.get("idLeague") or "eventsday"),
+                    source_url=f"eventsday {day}"))
+                for raw in raws:
+                    ingest_one(session, raw, report)
+            created += report.created
+            updated += report.updated
+            rejected += report.rejected
+            days_hit.append(f"{day}:{report.received}")
+        except Exception:
+            continue  # un jour en échec ne bloque pas l'autre (§64)
+    run_consistency(session)
+    latency = round((time.perf_counter() - t0) * 1000)
+    status = "OK" if days_hit else "DEGRADED"
+    log_job(session, "syncWorldDaily", "tsdb", status,
+            records=created + updated, created=created, updated=updated,
+            rejected=rejected, latency_ms=latency,
+            errors=None if days_hit else ["aucun jour récupéré (réseau ou source)"])
+    return {"worker": "syncWorldDaily", "created": created, "updated": updated,
+            "rejected": rejected, "days": days_hit}
 
 
 def run_results(session: Session) -> dict:

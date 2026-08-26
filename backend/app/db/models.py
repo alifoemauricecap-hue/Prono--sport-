@@ -610,3 +610,26 @@ class User(Base):
     name: Mapped[str] = mapped_column(String(60), unique=True)
     role: Mapped[str] = mapped_column(String(20), default="viewer")  # viewer | admin
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class LeagueResearch(Base):
+    """Recherche approfondie par LIGUE (Wikipedia FR/EN, CC BY-SA, 0 €).
+
+    Un dossier par compétition, mis en cache 7 jours : contexte historique,
+    format, palmarès — toujours avec source + licence, ou l'absence est
+    signalée (jamais de contexte inventé, §1/§45).
+    """
+    __tablename__ = "league_research"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    competition_id: Mapped[int] = mapped_column(ForeignKey("competitions.id"), unique=True)
+    title: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    extract: Mapped[str | None] = mapped_column(Text, nullable=True)
+    url: Mapped[str | None] = mapped_column(String(400), nullable=True)
+    thumbnail: Mapped[str | None] = mapped_column(String(400), nullable=True)
+    lang: Mapped[str | None] = mapped_column(String(5), nullable=True)   # fr | en
+    source: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    license: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    generated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    __table_args__ = (Index("ix_leagueresearch_comp", "competition_id"),)

@@ -19,7 +19,7 @@ HTTPS + domaine permanent (`prono-sport.onrender.com`), rien à configurer à la
 | ✅ Ce que tu gagnes | ⚠️ Les limites honnêtes |
 |---|---|
 | Zéro fichier à écrire : `render.yaml` prêt dans le repo | Free = **veille après 15 min** : le 1er visiteur attend le réveil (~30-60 s). Pour du 24/7 → Starter (7 $/mois) |
-| Auto-déploiement à chaque push sur `main` | **Pas de disque sur le Free** : à chaque redéploiement, la base repart de zéro et le **bootstrap auto** recompile les vraies données (~20-40 min). Prévu, pas un bug — jamais de données inventées |
+| Auto-déploiement à chaque push sur `main` | **Pas de disque sur le Free** : à chaque redéploiement, la base repart de zéro et le **bootstrap auto mondial** recompile les vraies données (~40-90 min). Prévu, pas un bug — jamais de données inventées |
 | `/v1/health` surveillé (healthcheck) | 512 Mo RAM : pendant le bootstrap/ingestion, le service est un peu plus lent |
 | `ADMIN_TOKEN` en secret (jamais dans le code) | L'API reste **sans clé payante** : les sources sont gratuites (fduk, ESPN, OpenLigaDB, TheSportsDB, Wikipedia, Open-Meteo) |
 
@@ -51,7 +51,7 @@ HTTPS + domaine permanent (`prono-sport.onrender.com`), rien à configurer à la
 2. Ouvre **`https://prono-sport.onrender.com`** (ou ton adresse Render).
 3. Si la page est vide au 1er chargement : c'est la **veille free** — recharges après 30 s,
    ou ouvre d'abord **`https://prono-sport.onrender.com/v1/health`** pour réveiller le service.
-4. Pendant le bootstrap (~20-40 min) : l'app affiche « DONNÉE INDISPONIBLE » → normal,
+4. Pendant le bootstrap mondial (~40-90 min) : l'app affiche « DONNÉE INDISPONIBLE » → normal,
    les vraies données arrivent en fond (onglet **Logs** → tu vois `[1/5]` … `[5/5]`).
 
 ## ÉTAPE 5 — Garder tout à jour (0 action)

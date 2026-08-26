@@ -10,6 +10,8 @@ zéro donnée inventée, zéro euro.
 | Module | État | Détail |
 |---|---|---|
 | **Données réelles** | ✅ | 83 matchs réels ingérés (Premier League, La Liga, FA Cup — saisons 2025-26 et 2026-27 : 78 terminés, 5 à venir), xG (10), arbitres (46), **cotes réelles de 5 bookmakers** (2 684 snapshots), cotes actuelles sur les matchs à venir |
+| **Couverture mondiale (0 €)** | ✅ | **Catalogue mondial 57 ligues / 6 confédérations** (slugs ESPN vérifiés) + **backbone TheSportsDB `eventsday` : TOUS les matchs du monde en 1 requête/jour** (les ligues hors catalogue apparaissent dès qu'elles jouent) + fduk (historiques profonds) · worker `syncWorldDaily` (1 h) + bootstrap mondial 6 étapes |
+| **Recherche approfondie par LIGUE** | ✅ | Dossier de recherche par ligue (Wikipedia FR/EN, CC BY-SA, 0 €) : **résolution des homonymies** (opensearch + scoring football), cache 7 j en base, bouton 🔎 sur Monde/Compétitions, `python -m app.cli world-research` pour toute la base |
 | **Moteur de modèles** | ✅ | Poisson + Dixon-Coles + Elo (ensemble documenté), entraînement anti-leakage, **3 prédictions** sur les matchs à venir + **6 Value Bets** (5 STRONG + 1 QUALIFIED) calculées sur cotes réelles (edge + EV) |
 | **Value Bet Engine** | ✅ | Marge retirée, edge, EV, niveaux POTENTIAL/QUALIFIED/STRONG, **NO QUALIFIED PICK** si rien ne franchit les seuils (jamais de pick forcé) |
 | **Backtest Lab + calibration** | ✅ | Walk-forward anti-leakage sur les 78 matchs terminés réels : **Brier / LogLoss / top-1 accuracy, modèle vs marché réel** (marge retirée). Séparé du paper-tracking et du live (§55) — affiché dans Analyses |
@@ -20,10 +22,10 @@ zéro donnée inventée, zéro euro.
 | **Workers journalisés** | ✅ | syncFixtures (5 min), syncLiveMatches (75 s), syncResults, syncLineups (45 min), syncOddsLive (3 h), syncWeather, syncHistorical, discoverSources (hebdo) — idempotents, journalisés (`sync_jobs`), failover |
 | **Temps réel** | ✅ | SSE `/v1/events` : buts (déduits des changements de score réels), statuts, value bets, sync |
 | **Résolution des pronos** | ✅ | WIN/LOSS/VOID/PENDING automatiques à la fin du match — prédiction originale **conservée telle quelle** (non-destructive, §54) |
-| **Interface (FR)** | ✅ | SPA mobile-first : Accueil, Live, À venir, Terminés, Compétitions, **Équipes**, **Pronostics**, Value Bets, Analyses (monitoring + backtest), Assistant IA, Recherche, **Favoris**, **Admin (9 panneaux)**, fiche match **9 onglets** (Aperçu, Pronos, Cotes, Stats, H2H, Météo, Événements, Risques, Analyse) |
+| **Interface (FR)** | ✅ | SPA mobile-first : Accueil, Live, À venir, Terminés, Compétitions, **🌍 Monde (couverture mondiale par confédération + 🔎 recherche ligue)**, **Équipes**, **Pronostics**, Value Bets, Analyses (monitoring + backtest), Assistant IA, Recherche, **Favoris**, **Admin (10 panneaux)**, fiche match **9 onglets** (Aperçu, Pronos, Cotes, Stats, H2H, Météo, Événements, Risques, Analyse) |
 | **Admin & sécurité** | ✅ | Panneau admin : vue d'ensemble, sources, syncs (déclenchables), qualité, backtest, prédictions, value bets, erreurs, **sauvegarde SQLite cohérente** (API + CLI) · **rate limiting** 300 req/min/IP · `ADMIN_TOKEN` optionnel sur les actions sensibles |
 | **Qualité & transparence** | ✅ | Data Quality Score par compétition, % vérifié (multi-sources), profondeur historique réelle, fraîcheur (FRESH/STALE) |
-| **Tests** | ✅ | **113 tests** dont la suite obligatoire 3.0 : NO FAKE DATA, DATA CONFLICT, LIVE, ODDS, LINEUP, PROVIDER FAILURE, BACKTEST, providers à clé, **ADMIN, SÉCURITÉ (rate limit, backup), DÉPLOIEMENT RENDER** |
+| **Tests** | ✅ | **125 tests** dont la suite obligatoire 3.0 : NO FAKE DATA, DATA CONFLICT, LIVE, ODDS, LINEUP, PROVIDER FAILURE, BACKTEST, providers à clé, **ADMIN, SÉCURITÉ (rate limit, backup), DÉPLOIEMENT RENDER, MONDE (catalogue, recherche ligue, worker)** |
 | **Honnêteté** | ✅ | xG absent → « DONNÉE INDISPONIBLE » (jamais d'estimation) · compositions/joueurs sans clé → affichés comme tels · historique partiel → profondeur réelle affichée · backtest < marché → affiché tel quel |
 
 ## Démarrage (0 €, 3 commandes)
@@ -93,12 +95,12 @@ aucune API payante. Elle est conçue pour **rester 100 % fonctionnelle sans rés
 
 **Honnêteté Render (détail dans `docs/09`)** : l'instance Free dort après 15 min d'inactivité
 (réveil 30-60 s) et n'a pas de disque persistant → à chaque redéploiement le **bootstrap auto**
-recompile les vraies données (~20-40 min). Toujours en ligne : Starter 7 $/mois ; persistance :
+recompile les vraies données (~40-90 min, couverture mondiale). Toujours en ligne : Starter 7 $/mois ; persistance :
 disque 0,25 $/Go/mois. **Rien n'exige de payer au démarrage.**
 
 **Comportement au premier déploiement** : l'app démarre immédiatement (interface FR + API) avec
 « DONNÉE NON DISPONIBLE », puis le **bootstrap auto** remplit la base avec les vraies données
-publiques (5 étapes, ~20-40 min) — tout est journalisé, idempotent, `|| true` (§64 : une source KO
+publiques (6 étapes, ~40-90 min, couverture mondiale) — tout est journalisé, idempotent, `|| true` (§64 : une source KO
 n'arrête jamais le tout).
 
 **Avant de déployer** : fusionner la branche `arena/01a03e4e-prono-sport` dans `main` (les images

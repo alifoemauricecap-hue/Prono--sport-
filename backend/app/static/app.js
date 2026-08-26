@@ -245,15 +245,21 @@ async function renderCompetitions() {
     ${c.competitions.map(x => {
       const qq = qmap[x.code];
       return `<div class="panel" style="cursor:pointer" data-comp="${esc(x.code)}">
-        <div class="row spread"><b>${esc(x.name)}</b>${qq?.score != null ? `<span class="muted">${qq.score}/100</span>` : unav("")}</div>
+        <div class="row spread"><b>${esc(x.name)}</b>
+          <span style="display:flex;gap:8px;align-items:center">
+          <button class="btn ghost mini-btn" data-research="${esc(x.code)}" title="Recherche approfondie de la ligue (0 €)">🔎</button>
+          ${qq?.score != null ? `<span class="muted">${qq.score}/100</span>` : unav("")}</span></div>
         <div class="muted">${esc(x.area || "—")} · ${x.fixtures} matchs en base</div>
         ${qq?.history_from ? `<div class="faint">Historique réel : ${qq.history_from} → ${qq.history_to}</div>` : `<div class="faint">Historique : en cours d'agrégation</div>`}
         ${qq?.missing?.length ? `<div class="faint">Manquant : ${qq.missing.map(esc).join(", ")}</div>` : ""}
       </div>`;
     }).join("")}
     </div>`;
-  document.querySelectorAll("[data-comp]").forEach(el =>
-    el.addEventListener("click", () => location.hash = `#/avenir?comp=${el.dataset.comp}`));
+    document.querySelectorAll("[data-comp]").forEach(el =>
+      el.addEventListener("click", (ev) => {
+        if (ev.target.closest("[data-research]")) return;  // 🔎 = recherche, pas navigation
+        location.hash = `#/avenir?comp=${el.dataset.comp}`;
+      }));
 }
 
 /* ---------------- Vue : VALUE BETS ---------------- */
@@ -790,6 +796,79 @@ async function renderFavoris() {
   }
 }
 
+/* ---------------- Vue : MONDE (couverture mondiale 0 €) ---------------- */
+const CONF_TXT = {
+  UEFA: "Europe (UEFA)", CONMEBOL: "Amérique du Sud (CONMEBOL)",
+  CONCACAF: "Amérique du Nord/Centre (CONCACAF)", AFC: "Asie (AFC)",
+  CAF: "Afrique (CAF)", OFC: "Océanie (OFC)", INTERNATIONAL: "Tournois internationaux",
+};
+async function renderMonde() {
+  view.innerHTML = `<div class="loading"><div class="spinner"></div><p>Couverture mondiale…</p></div>`;
+  try {
+    const d = await api("/v1/world");
+    const t = d.totals;
+    const stats = `
+      <div class="stat-cards">
+        <div class="stat-card"><div class="v">${t.catalog}</div><div class="l">Ligues au catalogue (ESPN)</div></div>
+        <div class="stat-card"><div class="v">${t.covered}</div><div class="l">Ligues avec données en base</div></div>
+        <div class="stat-card"><div class="v">${t.fixtures}</div><div class="l">Matchs en base (toutes ligues)</div></div>
+        <div class="stat-card"><div class="v">${t.competitions_in_db}</div><div class="l">Compétitions découvertes</div></div>
+      </div>
+      <p class="faint mt">🌐 ${esc(d.backbone_world)} — aucune ligue n'est oubliée : celles hors catalogue
+      apparaissent dès qu'une source les livre. Recherche approfondie par ligue : bouton 🔎 (Wikipedia FR/EN, 0 €).</p>`;
+    const groups = Object.entries(d.by_confederation).filter(([, n]) => n > 0);
+    view.innerHTML = `<h3 class="section-title">🌍 Couverture mondiale — 0 €</h3>${stats}
+      <div class="grid grid-2">
+      ${groups.map(([conf, n]) => `
+        <div class="panel">
+          <div class="row spread"><b>${esc(CONF_TXT[conf] || conf)}</b><span class="muted">${n} ligue${n > 1 ? "s" : ""}</span></div>
+          <div class="world-list">
+          ${d.leagues.filter(l => l.conf === conf).map(l => `
+            <div class="world-row">
+              <span class="wname"><b>${esc(l.name)}</b><span class="faint"> · ${esc(l.country)}</span></span>
+              <span class="wmeta">
+                ${l.fixtures > 0 ? `<span class="ev-pos">${l.fixtures} matchs</span>` : `<span class="faint">en attente de données</span>`}
+                <button class="btn ghost mini-btn" data-research="${esc(l.code)}" title="Recherche approfondie de la ligue">🔎</button>
+              </span>
+            </div>`).join("")}
+          </div>
+        </div>`).join("")}
+      </div>`;
+  } catch (e) {
+    view.innerHTML = `<div class="empty"><b>Erreur</b>${esc(e.message)}</div>`;
+  }
+}
+
+/* Modale : recherche approfondie d'une ligue (0 €) */
+async function openResearch(code) {
+  $("#research-modal").classList.remove("hidden");
+  document.body.style.overflow = "hidden";
+  const body = $("#research-body");
+  body.innerHTML = `<div class="loading"><div class="spinner"></div><p>Recherche en ligne (Wikipedia, 0 €)…</p></div>`;
+  try {
+    const r = await api(`/v1/competitions/${encodeURIComponent(code)}/research`);
+    if (r.status === "SOURCE") {
+      body.innerHTML = `
+        <div class="row spread mb"><b>🔎 Recherche — ${esc(r.title || code)}</b>${badge("SOURCE", r.source)}</div>
+        ${r.thumbnail ? `<img src="${esc(r.thumbnail)}" alt="" class="research-thumb" onerror="this.remove()">` : ""}
+        <div class="research-extract">${esc(r.extract)}</div>
+        ${r.url ? `<a class="faint" href="${esc(r.url)}" target="_blank" rel="noopener">Article source →</a>` : ""}
+        <p class="faint mt">Langue : ${esc(r.lang || "?")} · Licence ${esc(r.license || "CC BY-SA")} ·
+        ${r.cached ? "cache (7 j)" : "recherché à l'instant"} — <button class="btn ghost mini-btn" id="res-refresh">↻ Régénérer</button></p>`;
+      $("#res-refresh").addEventListener("click", () => openResearch(code));
+    } else {
+      body.innerHTML = `
+        <div class="row spread mb"><b>🔎 Recherche — ${esc(code)}</b>${badge("UNAVAILABLE", "Donnée indisponible")}</div>
+        <div class="research-extract">${esc(r.note || "Aucun article trouvé ou réseau indisponible.")}</div>
+        <p class="faint mt">Jamais de contexte inventé — <button class="btn ghost mini-btn" id="res-retry">↻ Réessayer</button></p>`;
+      $("#res-retry").addEventListener("click", () =>
+        api(`/v1/competitions/${encodeURIComponent(code)}/research?refresh=1`).then(openResearch.bind(null, code)));
+    }
+  } catch (e) {
+    body.innerHTML = `<div class="empty"><b>Erreur</b>${esc(e.message)}</div>`;
+  }
+}
+
 /* ---------------- Vue : ADMIN (pilotage réel, §63) ---------------- */
 const ADMIN_TABS = ["apercu", "sources", "sync", "qualite", "backtest", "predictions", "value", "erreurs", "backup"];
 const ADMIN_WORKERS = ["syncFixtures", "syncLiveMatches", "syncResults", "syncLineups", "syncOddsLive", "syncWeather", "syncHistorical", "discoverSources"];
@@ -925,7 +1004,7 @@ async function renderAdmin() {
 const ROUTES = {
   accueil: renderAccueil, live: renderLive, avenir: renderAvenir,
   termes: renderTermine, termines: renderTermine, competitions: renderCompetitions,
-  equipes: renderEquipes, pronostics: renderPronostics,
+  monde: renderMonde, equipes: renderEquipes, pronostics: renderPronostics,
   value: renderValue, analyses: renderAnalyses, assistant: renderAssistant,
   favoris: renderFavoris, admin: renderAdmin,
 };
@@ -953,8 +1032,14 @@ document.addEventListener("click", (e) => {
   if (openEl) { openMatch(+openEl.dataset.open); return; }
   const fxRow = e.target.closest("[data-fx]");
   if (fxRow) { openMatch(+fxRow.dataset.fx); return; }
+  const res = e.target.closest("[data-research]");
+  if (res) { openResearch(res.dataset.research); return; }
   if (e.target.closest("[data-close]")) {
     $("#match-modal").classList.add("hidden");
+    document.body.style.overflow = "";
+  }
+  if (e.target.closest("[data-close-research]")) {
+    $("#research-modal").classList.add("hidden");
     document.body.style.overflow = "";
   }
   if (e.target.closest("[data-close-notif]")) $("#notif-modal").classList.add("hidden");
@@ -972,6 +1057,7 @@ document.addEventListener("keydown", (e) => {
   if (e.key === "Escape") {
     $("#match-modal").classList.add("hidden");
     $("#notif-modal").classList.add("hidden");
+    $("#research-modal").classList.add("hidden");
     document.body.style.overflow = "";
   }
 });

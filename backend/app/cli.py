@@ -64,10 +64,25 @@ def _dates_range(back: int, ahead: int) -> list[str]:
 
 
 def cmd_ingest_espn(args) -> int:
+    """Ingestion ESPN — liste explicite OU catalogue mondial (--world, --conf, --country).
+
+    --world = TOUTES les ligues du catalogue (57, 6 confédérations) ; les échecs
+    par ligue sont journalisés et non bloquants (§64). Le reste du monde est couvert
+    par le backbone TSDB eventsday (cmd ingest-tsdb-day).
+    """
+    import time
+    from .world import slugs
     provider = get_provider("espn")
+    if args.world:
+        leagues = slugs(conf=args.conf, country=args.country)
+    elif args.leagues:
+        leagues = list(args.leagues)
+    else:
+        print("U : --leagues eng.1 … OU --world [--conf UEFA] [--country \"France\"]")
+        return 1
     dates = _dates_range(args.days_back, args.days_ahead)
     reports = []
-    for league in args.leagues:
+    for league in leagues:
         league_rep = {"league": league, "jours": len(dates), "created": 0, "updated": 0,
                       "skipped": 0, "rejected": 0, "errors": []}
         for d in dates:
@@ -88,6 +103,8 @@ def cmd_ingest_espn(args) -> int:
                 s.close()
         s = _session(); seed_data_sources(s); s.commit(); s.close()
         reports.append(league_rep)
+        if args.world:
+            time.sleep(0.2)  # politesse API publique : pas de rafale (§64)
     print(json.dumps(reports, ensure_ascii=False, indent=2))
     return 0
 
@@ -134,36 +151,73 @@ def cmd_ingest_tsdb(args) -> int:
 
 
 def cmd_ingest_tsdb_day(args) -> int:
-    """TSDB eventsday : TOUS les matchs mondiaux d'un jour en 1 seule requête (worldwide)."""
-    from datetime import date
-    from .providers import thesportsdb as tsdb_mod
+    """TSDB eventsday : TOUS les matchs mondiaux d'un jour en 1 seule requête (worldwide).
+
+    C'est le backbone de la couverture MONDIALE : une ligue hors catalogue ESPN
+    (Afrique, Moyen-Orient, 2ᵉ divisions lointaines…) apparaît ici dès qu'elle joue.
+    --days N : N derniers jours en N requêtes (1/jour) — idéal au bootstrap.
+    """
+    from datetime import date, timedelta
     provider = get_provider("tsdb")
-    day = args.date or date.today().isoformat()
-    r = None
+    days: list[str] = []
+    base = date.fromisoformat(args.date) if args.date else date.today()
+    for i in range(args.days):
+        days.append((base - timedelta(days=i)).isoformat())
+    results = []
+    for day in days:
+        r = None
+        s = _session()
+        try:
+            payload = provider._get("eventsday.php", {"d": day, "s": "Soccer"})
+            events = payload.get("events") or []
+            from .ingest.service import IngestReport, ingest_one
+            report = IngestReport(provider="tsdb")
+            for e in events:
+                # Réutilise le parseur d'événements TSDB générique (mêmes champs str*)
+                raws = list(provider.parse({"events": [e]}, league_id=str(e.get("idLeague") or "eventsday"),
+                                            source_url=f"eventsday {day}"))
+                for raw in raws:
+                    ingest_one(s, raw, report)
+            s.commit()
+            r = {"day": day, "received": report.received, "created": report.created,
+                 "rejected": report.rejected, "odds_rows": report.odds_rows, "errors": report.errors}
+        except Exception as exc:
+            r = {"day": day, "error": f"{type(exc).__name__}: {exc}"}
+        finally:
+            s.close()
+        results.append(r)
+    print(json.dumps(results, ensure_ascii=False, indent=2))
+    return 0
+
+
+def cmd_world_research(args) -> int:
+    """Recherche approfondie par LIGUE (Wikipedia FR/EN, 0 €) pour TOUTES les compétitions.
+
+    Génère le dossier de recherche de chaque ligue présente en base (cache 7 j).
+    --limit plafonne le nombre de ligues traitées dans l'appel (rate-limit poli).
+    """
+    import time
+    from .db.models import Competition
+    from .research.league import league_research
     s = _session()
-    try:
-        payload = provider._get("eventsday.php", {"d": day, "s": "Soccer"})
-        events = payload.get("events") or []
-        rep = run_ingestion(s, provider, [])  # no-op health init
-        created = 0
-        from .ingest.service import IngestReport, ingest_one
-        from .providers.base import RawFixture, TeamRef
-        from datetime import datetime, timezone
-        report = IngestReport(provider="tsdb")
-        for e in events:
-            # Réutilise le parseur d'événements TSDB générique (mêmes champs str*)
-            raws = list(provider.parse({"events": [e]}, league_id=str(e.get("idLeague") or "eventsday"),
-                                        source_url=f"eventsday {day}"))
-            for raw in raws:
-                ingest_one(s, raw, report)
-        s.commit()
-        r = {"day": day, "received": report.received, "created": report.created,
-             "rejected": report.rejected, "odds_rows": report.odds_rows, "errors": report.errors}
-    except Exception as exc:
-        r = {"day": day, "error": f"{type(exc).__name__}: {exc}"}
-    finally:
-        s.close()
-    print(json.dumps(r, ensure_ascii=False, indent=2))
+    comps = s.query(Competition).all()
+    if args.limit and args.limit > 0:
+        comps = comps[:args.limit]
+    out = []
+    for c in comps:
+        try:
+            r = league_research(s, c, refresh=args.refresh)
+            out.append({"code": c.code, "name": c.name, "status": r["status"],
+                        "title": r.get("title"), "cached": r.get("cached")})
+        except Exception as exc:
+            out.append({"code": c.code, "name": c.name,
+                        "status": f"ERREUR: {type(exc).__name__}: {exc}"})
+        time.sleep(0.15)  # politesse Wikipedia API (0 €)
+    s.close()
+    ok = sum(1 for o in out if o["status"] == "SOURCE")
+    print(json.dumps({"traitées": len(out), "recherché (SOURCE)": ok,
+                      "indisponibles": len(out) - ok, "dossiers": out},
+                     ensure_ascii=False, indent=2))
     return 0
 
 
@@ -441,7 +495,14 @@ def main() -> int:
     sp.set_defaults(fn=cmd_ingest_fduk)
 
     sp = sub.add_parser("ingest-espn")
-    sp.add_argument("--leagues", nargs="+", required=True, help="ex. eng.1 esp.1 uefa.champions")
+    sp.add_argument("--leagues", nargs="+", default=None,
+                    help="ex. eng.1 esp.1 uefa.champions (OU --world)")
+    sp.add_argument("--world", action="store_true",
+                    help="catalogue mondial (57 ligues, 6 confédérations)")
+    sp.add_argument("--conf", default=None,
+                    help="filtre confédération avec --world (UEFA/CONMEBOL/CONCACAF/AFC/CAF/OFC/INTERNATIONAL)")
+    sp.add_argument("--country", default=None,
+                    help='filtre pays avec --world (ex. "France")')
     sp.add_argument("--days-back", type=int, default=0)
     sp.add_argument("--days-ahead", type=int, default=0)
     sp.set_defaults(fn=cmd_ingest_espn)
@@ -456,9 +517,18 @@ def main() -> int:
     sp.add_argument("--season", default=None, help="ex. 2025-2026 ; vide = prochains matchs")
     sp.set_defaults(fn=cmd_ingest_tsdb)
 
-    sp = sub.add_parser("ingest-tsdb-day", help="tous les matchs mondiaux d'un jour (eventsday)")
+    sp = sub.add_parser("ingest-tsdb-day",
+                        help="backbone MONDIAL : tous les matchs du monde d'un jour (eventsday)")
     sp.add_argument("--date", default=None, help="YYYY-MM-DD, défaut : aujourd'hui")
+    sp.add_argument("--days", type=int, default=1,
+                    help="N derniers jours (N requêtes) — bootstrap mondial")
     sp.set_defaults(fn=cmd_ingest_tsdb_day)
+
+    sp = sub.add_parser("world-research",
+                        help="recherche approfondie par ligue (Wikipedia, 0 €) pour toute la base")
+    sp.add_argument("--limit", type=int, default=0, help="plafond de ligues traitées (0 = toutes)")
+    sp.add_argument("--refresh", action="store_true", help="forcer la régénération")
+    sp.set_defaults(fn=cmd_world_research)
 
     sp = sub.add_parser("ingest-fdorg")
     sp.add_argument("--competitions", nargs="+", required=True, help="ex. PL ELC PD BL1 SA FL1 CL")
