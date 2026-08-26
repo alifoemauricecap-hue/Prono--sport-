@@ -5,6 +5,13 @@
 set -e
 cd "$(dirname "$0")"
 mkdir -p ../data
+# S'assurer que le répertoire du fichier de base existe (ex. /data monté sur Render).
+python - <<'PY'
+from pathlib import Path
+from app.config import DATABASE_URL
+if DATABASE_URL.startswith("sqlite:///"):
+    Path(DATABASE_URL.replace("sqlite:///", "", 1)).parent.mkdir(parents=True, exist_ok=True)
+PY
 python -m app.cli init-db
 
 NEED=$(python - <<'PY'

@@ -377,6 +377,29 @@ def cmd_backtest(args) -> int:
     return 0
 
 
+def cmd_backup(_args) -> int:
+    """§78 SÉCURITÉ : sauvegarde SQLite COHÉRENTE (sqlite3.backup) → data/backups/."""
+    import datetime as _dt
+    import sqlite3
+    from .config import DATA_DIR
+    if not DATABASE_URL.startswith("sqlite:///"):
+        print("Backup CLI réservé à SQLite (Postgres : pg_dump).")
+        return 1
+    src_path = DATABASE_URL.replace("sqlite:///", "", 1)
+    out_dir = DATA_DIR / "backups"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    stamp = _dt.datetime.now().strftime("%Y%m%d-%H%M%S")
+    out = out_dir / f"prono-sport-{stamp}.db"
+    src = sqlite3.connect(src_path)
+    dst = sqlite3.connect(str(out))
+    with dst:
+        src.backup(dst)
+    src.close()
+    dst.close()
+    print(f"✅ Sauvegarde cohérente : {out} ({out.stat().st_size // 1024} Ko)")
+    return 0
+
+
 def cmd_status(_args) -> int:
     s = _session()
     n_fixtures = s.query(Fixture).count()
@@ -478,6 +501,9 @@ def main() -> int:
     sp = sub.add_parser("backtest", help="§35/§36 : backtest walk-forward + calibration")
     sp.add_argument("--min-history", type=int, default=30)
     sp.set_defaults(fn=cmd_backtest)
+
+    sp = sub.add_parser("backup", help="§78 : sauvegarde SQLite cohérente → data/backups/")
+    sp.set_defaults(fn=cmd_backup)
 
     sp = sub.add_parser("status"); sp.set_defaults(fn=cmd_status)
 

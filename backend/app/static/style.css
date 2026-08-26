@@ -269,3 +269,11 @@ footer.footer { text-align: center; padding: 26px 16px 10px; color: var(--faint)
 a.fx-link { color: var(--text); font-weight: 600; }
 .star { cursor: pointer; font-size: 15px; opacity: .55; }
 .star.on { opacity: 1; color: var(--warn); }
+
+/* ---------------- Admin (onglets) ---------------- */
+.admin-tabs { display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 12px; }
+.admin-tabs button {
+  background: var(--panel); border: 1px solid var(--border); color: var(--text);
+  padding: 6px 12px; border-radius: 8px; cursor: pointer; font-size: 13px; text-transform: capitalize;
+}
+.admin-tabs button.active { background: var(--accent); border-color: var(--accent); color: #fff; }

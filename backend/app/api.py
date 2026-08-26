@@ -20,7 +20,7 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
-from fastapi import FastAPI, Query
+from fastapi import FastAPI, Header, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from sqlalchemy.orm import Session, joinedload
@@ -57,6 +57,42 @@ SF = make_session_factory(ENGINE)
 app = FastAPI(title="PRONO SPORT API", version="3.0.0-alpha", docs_url="/v1/docs")
 app.add_middleware(CORSMiddleware, allow_origins=["*"],
                    allow_methods=["GET", "POST", "OPTIONS"], allow_headers=["*"])
+
+# =============================================================================
+# PHASE 19 — SÉCURITÉ : rate limiting (0 €, mémoire, par IP)
+# Le flux SSE /v1/events est exempté (connexion longue par nature).
+# =============================================================================
+from collections import deque
+
+from starlette.responses import PlainTextResponse
+
+RATE_LIMIT_PER_MIN = 300
+RATE_WINDOW_S = 60
+_RATE_BUCKETS: dict[str, deque] = {}
+
+
+def _rate_limit_check(path: str, ip: str) -> bool:
+    """Fenêtre glissante par IP — True = autorisé. /v1/events est exempté (SSE)."""
+    if not path.startswith("/v1") or path == "/v1/events":
+        return True
+    now = time.monotonic()
+    dq = _RATE_BUCKETS.setdefault(ip, deque())
+    while dq and now - dq[0] > RATE_WINDOW_S:
+        dq.popleft()
+    if len(dq) >= RATE_LIMIT_PER_MIN:
+        return False
+    dq.append(now)
+    return True
+
+
+@app.middleware("http")
+async def _rate_limit(request, call_next):
+    ip = request.client.host if request.client else "inconnu"
+    if not _rate_limit_check(request.url.path, ip):
+        return PlainTextResponse(
+            f"429 — TROP DE REQUÊTES (limite : {RATE_LIMIT_PER_MIN}/min par IP). Ralentissez.",
+            status_code=429)
+    return await call_next(request)
 
 # Frontend statique (style.css, app.js, images) — servi par l'API (1 seul déploiement, 0 €)
 from fastapi.staticfiles import StaticFiles
@@ -853,8 +889,8 @@ def mark_notifications_read() -> JSONResponse:
 
 
 @app.post("/v1/admin/sync/{worker}")
-def admin_sync(worker: str, x_admin_token: str | None = None) -> JSONResponse:
-    """§63 Admin — déclenche un worker à la demande (optionnel : ADMIN_TOKEN)."""
+def admin_sync(worker: str, x_admin_token: str | None = Header(default=None, alias="x-admin-token")) -> JSONResponse:
+    """§63 Admin — déclenche un worker à la demande (optionnel : ADMIN_TOKEN, en-tête x-admin-token)."""
     import os
     expected = os.environ.get("ADMIN_TOKEN")
     if expected and x_admin_token != expected:
@@ -880,6 +916,85 @@ def admin_sync(worker: str, x_admin_token: str | None = None) -> JSONResponse:
         return JSONResponse(result)
     except Exception as exc:
         return JSONResponse({"error": f"{type(exc).__name__}: {exc}"}, status_code=500)
+
+
+@app.get("/v1/admin/overview")
+def admin_overview() -> JSONResponse:
+    """§63 ADMIN — vue d'ensemble de la plateforme (état RÉEL de la base)."""
+    from sqlalchemy import func
+    from .db.models import AnalysisReport, SyncJob
+    with SF() as s:
+        # select() + group_by explicite : le Query legacy (colonne + agrégat) n'émet
+        # PAS de GROUP BY → SQLite retournerait le statut d'une ligne arbitraire.
+        from sqlalchemy import select
+        by_status = {st: n for st, n in
+                     s.execute(select(Fixture.status, func.count(Fixture.id))
+                               .group_by(Fixture.status)).all()}
+        last_sync: dict[str, dict] = {}
+        for r in s.query(SyncJob).order_by(SyncJob.id.desc()).all():
+            if r.worker not in last_sync:
+                last_sync[r.worker] = {"status": r.status, "records": r.records,
+                                       "at": r.finished_at.isoformat() if r.finished_at else None}
+        return JSONResponse({
+            "api": "prono-sport:3.0-alpha",
+            "fixtures": {"total": s.query(Fixture).count(), "by_status": by_status},
+            "competitions": s.query(Competition).count(),
+            "predictions": s.query(Prediction).count(),
+            "value_bets": s.query(ValueBet).count(),
+            "reports": s.query(AnalysisReport).count(),
+            "sse_clients": BUS.n_subscribers,
+            "last_sync": last_sync,
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+        })
+
+
+@app.get("/v1/admin/errors")
+def admin_errors() -> JSONResponse:
+    """§63 ADMIN — jobs de sync en erreur ou avec rejets (réels, table sync_jobs)."""
+    from .db.models import SyncJob
+    with SF() as s:
+        rows = (s.query(SyncJob)
+                .filter((SyncJob.status == "FAILED") | (SyncJob.rejected > 0)
+                        | SyncJob.errors.isnot(None))
+                .order_by(SyncJob.id.desc()).limit(30).all())
+        return JSONResponse({
+            "errors": [{"worker": r.worker, "provider": r.provider, "status": r.status,
+                        "records": r.records, "rejected": r.rejected, "errors": r.errors,
+                        "latency_ms": r.latency_ms,
+                        "finished_at": r.finished_at.isoformat() if r.finished_at else None}
+                       for r in rows],
+            "note": "Enregistrements réels de sync_jobs — liste vide = aucune erreur, rien n'est masqué."})
+
+
+@app.get("/v1/admin/backup")
+def admin_backup(x_admin_token: str | None = Header(default=None, alias="x-admin-token")):
+    """§63/§78 ADMIN — téléchargement d'une sauvegarde SQLite COHÉRENTE (sqlite3.backup)."""
+    import sqlite3
+    import tempfile
+    from fastapi.responses import Response
+    expected = os.environ.get("ADMIN_TOKEN")
+    if expected and x_admin_token != expected:
+        return Response("403 — token admin invalide (en-tête x-admin-token)", status_code=403)
+    if not DATABASE_URL.startswith("sqlite:///"):
+        return Response("400 — backup via cet endpoint réservé à SQLite (Postgres : pg_dump)",
+                        status_code=400)
+    src_path = DATABASE_URL.replace("sqlite:///", "", 1)
+    tmp = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
+    tmp.close()
+    try:
+        src = sqlite3.connect(src_path)
+        dst = sqlite3.connect(tmp.name)
+        with dst:
+            src.backup(dst)
+        src.close()
+        dst.close()
+        with open(tmp.name, "rb") as f:
+            data = f.read()
+    finally:
+        os.unlink(tmp.name)
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+    return Response(content=data, media_type="application/x-sqlite3",
+                    headers={"Content-Disposition": f'attachment; filename="prono-sport-{stamp}.db"'})
 
 
 # --- Scheduler live 3.0 (§43 : workers nommés, journalisés, événements SSE) ---

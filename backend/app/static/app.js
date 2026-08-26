@@ -577,7 +577,46 @@ function mcShowTab(tab) {
   if (tab === "apercu") body.innerHTML = mcApercu();
   if (tab === "pronos") body.innerHTML = mcPronos();
   if (tab === "cotes") body.innerHTML = mcCotes();
+  if (tab === "stats") body.innerHTML = mcStats();
+  if (tab === "h2h") body.innerHTML = mcRepSection("Historique");
+  if (tab === "meteo") body.innerHTML = mcRepSection("Météo");
+  if (tab === "evenements") body.innerHTML = mcEvenements();
+  if (tab === "risques") body.innerHTML = mcRepSection("Risques");
   if (tab === "analyse") body.innerHTML = mcAnalyse();
+}
+function mcStats() {
+  const st = MC.st;
+  if (st?.stats?.length) return `
+    <div class="mc-block"><div class="bh"><b>Statistiques du match</b>${badge("SOURCE")}</div>
+      <table class="table"><thead><tr><th></th>${st.stats.map(s => `<th>${esc(s.team)}</th>`).join("")}</tr></thead>
+      <tbody>
+        ${[["possession","Possession %"],["tirs","Tirs"],["tirs_cadres","Tirs cadrés"],["corners","Corners"],["fautes","Fautes"],["cartons","Cartons"]].map(([k,l]) =>
+          `<tr><td class="muted">${l}</td>${st.stats.map(s => `<td>${s[k] ?? "—"}</td>`).join("")}</tr>`).join("")}
+      </tbody></table>
+    </div>`;
+  return `<div class="empty"><b>STATS UNAVAILABLE</b>Aucune source active ne fournit les stats de ce match — jamais de statistique inventée.</div>`;
+}
+function mcEvenements() {
+  if (MC.ev?.events?.length) return `
+    <div class="mc-block"><div class="bh"><b>Événements</b>${badge("CALCULE", "déduits du score réel")}</div>
+      ${MC.ev.events.slice().reverse().map(e => `<div class="row" style="padding:3px 0;font-size:12.5px">
+        <span class="faint">${e.minute != null ? e.minute + "' " : ""}</span>
+        ${e.type === "GOAL" ? "⚽" : "🔁"} ${esc(e.detail || e.type)}${e.team ? ` · ${esc(e.team)}` : ""}</div>`).join("")}
+    </div>`;
+  return `<div class="empty"><b>AUCUN ÉVÉNEMENT</b>Les événements sont déduits des changements de score réels — rien à afficher pour ce match.</div>`;
+}
+function mcRepSection(label) {
+  const rep = MC.rep;
+  if (!rep) return `<div class="loading"><div class="spinner"></div><p>Chargement du rapport…</p></div>`;
+  const s = (rep.sections || []).find(x => x.label === label);
+  if (!s) return `<div class="empty"><b>SECTION ABSENTE</b></div>`;
+  if (s.status === "UNAVAILABLE") return `<div class="empty"><b>DONNÉE INDISPONIBLE</b>${s.note ? esc(s.note) : ""}</div>`;
+  return `
+    <div class="report-sec"><div class="rh"><b>${esc(s.label)}</b>${badge(s.status)}</div>
+      <div class="rc">${reportContent(s)}</div>
+      ${s.source ? `<div class="faint mt">Source : ${esc(s.source)}</div>` : ""}
+      ${s.note ? `<div class="faint">${esc(s.note)}</div>` : ""}
+    </div>`;
 }
 function mcApercu() {
   const a = MC.an, c = MC.card;
@@ -598,24 +637,6 @@ function mcApercu() {
         <span>${esc(s.provider)} → ${s.score_home ?? "–"} ${s.score_away != null ? `– ${s.score_away}` : ""}</span>
         ${badge(s.data_status)}</div>`).join("") || unav("Aucune source enregistrée")}
     </div>
-    ${MC.ev?.events?.length ? `
-    <div class="mc-block">
-      <div class="bh"><b>Événements</b>${badge("CALCULE", "déduits du score réel")}</div>
-      ${MC.ev.events.slice().reverse().map(e => `<div class="row" style="padding:3px 0;font-size:12.5px">
-        <span class="faint">${e.minute != null ? e.minute + "' " : ""}</span>
-        ${e.type === "GOAL" ? "⚽" : "🔁"} ${esc(e.detail || e.type)}
-        ${e.team ? `· ${esc(e.team)}` : ""}</div>`).join("")}
-    </div>` : ""}
-    ${MC.st?.stats?.length ? `
-    <div class="mc-block">
-      <div class="bh"><b>Statistiques du match</b>${badge("SOURCE")}</div>
-      <table class="table"><thead><tr><th></th>${MC.st.stats.map(s => `<th>${esc(s.team)}</th>`).join("")}</tr></thead>
-      <tbody>
-        ${[["possession","Possession %"],["tirs","Tirs"],["tirs_cadres","Tirs cadrés"],["corners","Corners"],["fautes","Fautes"],["cartons","Cartons"]].map(([k,l]) =>
-          `<tr><td class="muted">${l}</td>${MC.st.stats.map(s => `<td>${s[k] ?? "—"}</td>`).join("")}</tr>`).join("")}
-      </tbody></table>
-    </div>` : `
-    <div class="mc-block"><div class="bh"><b>Statistiques du match</b></div>${unav("Aucune source active ne fournit les stats de ce match.")}</div>`}
     <div class="mc-block"><div class="bh"><b>Contexte</b></div>
       <div class="faint">Compétition : ${esc(c?.competition?.name || "—")} · Saison : ${esc(a?.fixture?.competition || "")} · Statut : ${esc(c?.status || "—")}</div>
     </div>`;
@@ -741,12 +762,172 @@ async function refreshNotifCount() {
   } catch (e) { /* silencieux */ }
 }
 
+/* ---------------- Vue : FAVORIS (local, 0 €) ---------------- */
+async function renderFavoris() {
+  view.innerHTML = `<div class="loading"><div class="spinner"></div></div>`;
+  if (!FAV.size) {
+    view.innerHTML = `<div class="empty"><b>Aucun favori</b>Cliquez sur la ☆ d'un match pour le garder ici.<br>
+      <span class="faint">Stockage local de votre navigateur uniquement — 0 €, aucune donnée envoyée.</span></div>`;
+    return;
+  }
+  const ids = [...FAV];
+  try {
+    const [live, up, fin] = await Promise.all([
+      api("/v1/fixtures?tab=live&limit=60"),
+      api("/v1/fixtures?tab=upcoming&limit=200"),
+      api("/v1/fixtures?tab=finished&limit=200"),
+    ]);
+    const all = [...live.fixtures, ...up.fixtures, ...fin.fixtures];
+    const cards = all.filter(f => ids.includes(f.id));
+    const found = new Set(cards.map(c => c.id));
+    const lost = ids.filter(id => !found.has(id));
+    view.innerHTML = `
+      <h3 class="section-title">⭐ Mes favoris (${cards.length})</h3>
+      ${lost.length ? `<div class="empty mb">${lost.map(id => `Favori #${id} : non retrouvé dans la base — match retiré par une source ?`).join("<br>")}</div>` : ""}
+      ${cardsHtml(cards)}`;
+  } catch (e) {
+    view.innerHTML = `<div class="empty"><b>Erreur</b>${esc(e.message)}</div>`;
+  }
+}
+
+/* ---------------- Vue : ADMIN (pilotage réel, §63) ---------------- */
+const ADMIN_TABS = ["apercu", "sources", "sync", "qualite", "backtest", "predictions", "value", "erreurs", "backup"];
+const ADMIN_WORKERS = ["syncFixtures", "syncLiveMatches", "syncResults", "syncLineups", "syncOddsLive", "syncWeather", "syncHistorical", "discoverSources"];
+let ADMIN = { tab: "apercu" };
+function adminToken() { return localStorage.getItem("ps_admin_token") || ""; }
+async function renderAdmin() {
+  view.innerHTML = `
+    <h3 class="section-title">⚙️ Admin — pilotage réel de la plateforme</h3>
+    <div class="admin-tabs">${ADMIN_TABS.map(t =>
+      `<button data-atab="${t}" class="${ADMIN.tab === t ? "active" : ""}">${esc(t)}</button>`).join("")}</div>
+    <div id="admin-body"><div class="loading"><div class="spinner"></div></div></div>`;
+  document.querySelectorAll("[data-atab]").forEach(b =>
+    b.addEventListener("click", () => { ADMIN.tab = b.dataset.atab; renderAdmin(); }));
+  const body = $("#admin-body");
+  try {
+    if (ADMIN.tab === "apercu") {
+      const d = await api("/v1/admin/overview");
+      const st = d.fixtures.by_status || {};
+      body.innerHTML = `
+        <div class="stat-cards">
+          <div class="stat-card"><div class="v">${d.fixtures.total}</div><div class="l">Matchs (SCHED ${st.SCHEDULED ?? 0} · FIN ${st.FINISHED ?? 0} · LIVE ${st.LIVE ?? 0})</div></div>
+          <div class="stat-card"><div class="v">${d.competitions}</div><div class="l">Compétitions</div></div>
+          <div class="stat-card"><div class="v">${d.predictions}</div><div class="l">Prédictions</div></div>
+          <div class="stat-card"><div class="v" style="color:var(--value)">${d.value_bets}</div><div class="l">Value bets</div></div>
+          <div class="stat-card"><div class="v">${d.sse_clients}</div><div class="l">Clients SSE connectés</div></div>
+        </div>
+        <div class="panel"><div class="bh"><b>Dernière sync par worker</b></div>
+        ${Object.entries(d.last_sync).map(([w, s2]) =>
+          `<div class="row spread" style="padding:3px 0"><span>${esc(w)}</span>
+           <span class="muted">${badge(s2.status === "OK" ? "OK" : "DOWN", s2.status)} · ${s2.records ?? 0} records · ${fmtTime(s2.at)}</span></div>`).join("")
+          || `<p class="muted">Aucune sync journalisée pour le moment.</p>`}
+        <div class="faint mt">Généré le ${fmtTime(d.generated_at)} — état réel de la base.</div></div>`;
+    } else if (ADMIN.tab === "sources") {
+      const d = await api("/v1/sources");
+      body.innerHTML = `<table class="table"><thead><tr><th>Source</th><th>Statut</th><th>Fiabilité</th><th>Disponibilité</th><th>CGU</th></tr></thead><tbody>
+      ${d.sources.map(s => `<tr>
+        <td><b>${esc(s.name)}</b><div class="faint">${esc(s.kind || "")}</div></td>
+        <td>${badge(s.status)}</td>
+        <td>${s.reliability != null ? `<b>${s.reliability}</b>` : unav("")}<div class="faint">${esc(s.reliability_note || "")}</div></td>
+        <td>${s.availability ? badge(s.availability === "OK" ? "OK" : s.availability, s.availability) : unav("")}</td>
+        <td class="faint">${esc(s.terms_status || "")}</td></tr>`).join("")}</tbody></table>`;
+    } else if (ADMIN.tab === "sync") {
+      const d = await api("/v1/sync-jobs");
+      body.innerHTML = `
+        <div class="panel mb">
+          <div class="row spread"><b>Déclencher un worker (journalisé)</b>
+            <input id="admin-token" type="password" placeholder="ADMIN_TOKEN (optionnel, mémorisé localement)" value="${esc(adminToken())}" style="max-width:280px"></div>
+          <div class="src-row mt">${ADMIN_WORKERS.map(w => `<button class="btn ghost" data-run="${w}">▶ ${w}</button>`).join("")}</div>
+          <div id="run-out" class="faint mt"></div>
+        </div>
+        <h4 class="section-title">Journal des syncs (sync_jobs)</h4>
+        <table class="table"><thead><tr><th>#</th><th>Worker</th><th>Provider</th><th>Statut</th><th>Records</th><th>Rejetés</th><th>Latence</th><th>Fin</th></tr></thead><tbody>
+        ${(d.jobs || []).slice(0, 25).map(j => `<tr><td>${j.id}</td><td>${esc(j.worker)}</td><td>${esc(j.provider || "")}</td>
+          <td>${badge(j.status === "OK" ? "OK" : "DOWN", j.status)}</td><td>${j.records ?? 0}</td><td>${j.rejected ?? 0}</td>
+          <td>${j.latency_ms != null ? j.latency_ms + " ms" : "—"}</td><td>${fmtTime(j.finished_at)}</td></tr>`).join("")
+          || `<tr><td colspan="8" class="muted">Aucune sync journalisée.</td></tr>`}</tbody></table>`;
+      document.querySelectorAll("[data-run]").forEach(b => b.addEventListener("click", async () => {
+        localStorage.setItem("ps_admin_token", $("#admin-token").value.trim());
+        const out = $("#run-out");
+        out.innerHTML = `⏳ <b>${esc(b.dataset.run)}</b> : en cours…`;
+        try {
+          const r = await api(`/v1/admin/sync/${b.dataset.run}`, {
+            method: "POST", headers: adminToken() ? { "x-admin-token": adminToken() } : {},
+          });
+          out.innerHTML = `✅ <b>${esc(b.dataset.run)}</b> : ${esc(JSON.stringify(r).slice(0, 300))}`;
+        } catch (e) { out.innerHTML = `❌ <b>${esc(b.dataset.run)}</b> : ${esc(e.message)}`; }
+      }));
+    } else if (ADMIN.tab === "qualite") {
+      const d = await api("/v1/quality");
+      body.innerHTML = `<table class="table"><thead><tr><th>Compétition</th><th>Score</th><th>Vérifiés</th><th>Sources</th><th>Historique réel</th><th>Fraîcheur</th><th>Manquant</th></tr></thead><tbody>
+      ${(d.quality || []).map(q => `<tr><td>${esc(q.name)}</td><td><b>${q.score}/100</b></td><td>${q.verified_pct} %</td><td>${q.n_sources}</td>
+        <td>${q.history_from ? `${q.history_from} → ${q.history_to}` : unav("")}</td>
+        <td>${q.freshness_min != null ? q.freshness_min + " min" : "—"}</td>
+        <td class="faint">${(q.missing || []).map(esc).join(", ") || "—"}</td></tr>`).join("")}</tbody></table>`;
+    } else if (ADMIN.tab === "backtest") {
+      const d = await api("/v1/backtest");
+      body.innerHTML = `<p class="muted mb">${esc(d.method || "")}</p>
+      <table class="table"><thead><tr><th>Compétition</th><th>Matchs</th><th>Backtestés</th><th>Brier mod.</th><th>LogLoss mod.</th><th>Top-1 mod.</th><th>Brier marché</th><th>Note</th></tr></thead><tbody>
+      ${d.competitions.map(c => `<tr><td>${esc(c.name)}</td><td>${c.matches_total}</td><td>${c.matches_backtested}</td>
+        <td>${c.brier_model != null ? c.brier_model : unav("")}</td>
+        <td>${c.logloss_model != null ? c.logloss_model : unav("")}</td>
+        <td>${c.accuracy_top1_model != null ? Math.round(c.accuracy_top1_model * 100) + " %" : unav("")}</td>
+        <td>${c.market && c.market.brier != null ? c.market.brier : unav("")}</td>
+        <td class="faint">${esc(c.note || "")}</td></tr>`).join("")}</tbody></table>`;
+    } else if (ADMIN.tab === "predictions") {
+      const d = await api("/v1/predictions/results");
+      body.innerHTML = d.results.length ? `<table class="table"><thead><tr><th>Match</th><th>Modèle</th><th>Statut</th><th>Résultat</th></tr></thead><tbody>
+        ${d.results.map(r => `<tr><td>${esc(r.home || "")} – ${esc(r.away || "")}</td><td>${esc(r.model_version || "")}</td>
+          <td>${badge(r.result === "WIN" ? "OK" : r.result === "LOSS" ? "DOWN" : "NA", r.result || "PENDING")}</td>
+          <td class="faint">${esc(r.actual || r.final_score || "en attente du match")}</td></tr>`).join("")}</tbody></table>`
+        : `<div class="empty"><b>AUCUNE PRÉDICTION RÉSOLUE</b>Les résultats WIN/LOSS/VOID apparaissent après la fin des matchs — la prédiction originale est conservée telle quelle.</div>`;
+    } else if (ADMIN.tab === "value") {
+      const d = await api("/v1/value-bets?min_level=POTENTIAL&limit=50");
+      body.innerHTML = (d.value_bets || []).length ? `<table class="table"><thead><tr><th>Match</th><th>Marché</th><th>Sélection</th><th>Cote</th><th>EV</th><th>Niveau</th></tr></thead><tbody>
+        ${d.value_bets.map(v => `<tr style="cursor:pointer" data-fx="${v.fixture_id}"><td>${esc(v.home)} – ${esc(v.away)}</td>
+          <td>${esc(v.market)}</td><td>${esc(SEL_TXT[v.selection] || v.selection)}</td><td>${v.odds_reference}</td>
+          <td class="${v.ev_pct >= 0 ? "ev-pos" : "ev-neg"}">${v.ev_pct > 0 ? "+" : ""}${v.ev_pct} %</td><td>${badge(v.level, v.level)}</td></tr>`).join("")}</tbody></table>`
+        : `<div class="empty"><b>NO QUALIFIED PICK</b>Aucune value bet active en ce moment — jamais de pick forcé.</div>`;
+    } else if (ADMIN.tab === "erreurs") {
+      const d = await api("/v1/admin/errors");
+      body.innerHTML = d.errors.length ? `<table class="table"><thead><tr><th>Worker</th><th>Provider</th><th>Statut</th><th>Records</th><th>Rejetés</th><th>Erreurs</th><th>Fin</th></tr></thead><tbody>
+        ${d.errors.map(e => `<tr><td>${esc(e.worker)}</td><td>${esc(e.provider || "")}</td><td>${badge("DOWN", e.status)}</td>
+          <td>${e.records ?? 0}</td><td>${e.rejected ?? 0}</td><td class="faint">${esc(e.errors || "")}</td><td>${fmtTime(e.finished_at)}</td></tr>`).join("")}</tbody></table>`
+        : `<div class="empty"><b>✅ AUCUNE ERREUR</b>${esc(d.note)}</div>`;
+    } else if (ADMIN.tab === "backup") {
+      body.innerHTML = `<div class="panel"><b>🗄 Sauvegarde de la base (SQLite cohérente)</b>
+        <p class="muted mt">Télécharge un fichier <code>.db</code> cohérent (API sqlite3.backup) — archivage local ou restauration.
+        Si <code>ADMIN_TOKEN</code> est défini côté serveur, il est exigé (mémorisé ci-contre, en-tête x-admin-token).</p>
+        <div class="src-row mt">
+          <input id="bk-token" type="password" placeholder="ADMIN_TOKEN (si défini)" value="${esc(adminToken())}" style="max-width:280px">
+          <button class="btn" id="do-backup">⬇ Télécharger la sauvegarde</button>
+        </div>
+        <div id="bk-out" class="faint mt"></div></div>`;
+      $("#do-backup").addEventListener("click", async () => {
+        localStorage.setItem("ps_admin_token", $("#bk-token").value.trim());
+        const out = $("#bk-out"); out.textContent = "Génération…";
+        try {
+          const r = await fetch("/v1/admin/backup", { headers: adminToken() ? { "x-admin-token": adminToken() } : {} });
+          if (!r.ok) { out.textContent = `❌ ${r.status} — ${esc((await r.text()).slice(0, 200))}`; return; }
+          const blob = await r.blob();
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement("a");
+          a.href = url; a.download = `prono-sport-${new Date().toISOString().slice(0, 19).replace(/[-:TZ]/g, "")}.db`; a.click();
+          URL.revokeObjectURL(url);
+          out.textContent = `✅ ${Math.round(blob.size / 1024)} Ko téléchargés.`;
+        } catch (e) { out.textContent = "❌ " + e.message; }
+      });
+    }
+  } catch (e) { body.innerHTML = `<div class="empty"><b>Erreur</b>${esc(e.message)}</div>`; }
+}
+
 /* ---------------- Routing ---------------- */
 const ROUTES = {
   accueil: renderAccueil, live: renderLive, avenir: renderAvenir,
   termes: renderTermine, termines: renderTermine, competitions: renderCompetitions,
   equipes: renderEquipes, pronostics: renderPronostics,
   value: renderValue, analyses: renderAnalyses, assistant: renderAssistant,
+  favoris: renderFavoris, admin: renderAdmin,
 };
 function route() {
   const h = location.hash.replace(/^#\//, "") || "accueil";

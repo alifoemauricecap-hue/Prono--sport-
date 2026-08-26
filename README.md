@@ -20,9 +20,10 @@ zéro donnée inventée, zéro euro.
 | **Workers journalisés** | ✅ | syncFixtures (5 min), syncLiveMatches (75 s), syncResults, syncLineups (45 min), syncOddsLive (3 h), syncWeather, syncHistorical, discoverSources (hebdo) — idempotents, journalisés (`sync_jobs`), failover |
 | **Temps réel** | ✅ | SSE `/v1/events` : buts (déduits des changements de score réels), statuts, value bets, sync |
 | **Résolution des pronos** | ✅ | WIN/LOSS/VOID/PENDING automatiques à la fin du match — prédiction originale **conservée telle quelle** (non-destructive, §54) |
-| **Interface (FR)** | ✅ | SPA mobile-first : Accueil, Live, À venir, Terminés, Compétitions, **Équipes**, **Pronostics**, Value Bets, Analyses (monitoring + backtest), Assistant IA, Recherche, fiche match 4 onglets (Aperçu, Pronos, Cotes, Analyse) |
+| **Interface (FR)** | ✅ | SPA mobile-first : Accueil, Live, À venir, Terminés, Compétitions, **Équipes**, **Pronostics**, Value Bets, Analyses (monitoring + backtest), Assistant IA, Recherche, **Favoris**, **Admin (9 panneaux)**, fiche match **9 onglets** (Aperçu, Pronos, Cotes, Stats, H2H, Météo, Événements, Risques, Analyse) |
+| **Admin & sécurité** | ✅ | Panneau admin : vue d'ensemble, sources, syncs (déclenchables), qualité, backtest, prédictions, value bets, erreurs, **sauvegarde SQLite cohérente** (API + CLI) · **rate limiting** 300 req/min/IP · `ADMIN_TOKEN` optionnel sur les actions sensibles |
 | **Qualité & transparence** | ✅ | Data Quality Score par compétition, % vérifié (multi-sources), profondeur historique réelle, fraîcheur (FRESH/STALE) |
-| **Tests** | ✅ | **98 tests** dont la suite obligatoire 3.0 : NO FAKE DATA, DATA CONFLICT, LIVE, ODDS, LINEUP, PROVIDER FAILURE, BACKTEST, providers à clé |
+| **Tests** | ✅ | **113 tests** dont la suite obligatoire 3.0 : NO FAKE DATA, DATA CONFLICT, LIVE, ODDS, LINEUP, PROVIDER FAILURE, BACKTEST, providers à clé, **ADMIN, SÉCURITÉ (rate limit, backup), DÉPLOIEMENT RENDER** |
 | **Honnêteté** | ✅ | xG absent → « DONNÉE INDISPONIBLE » (jamais d'estimation) · compositions/joueurs sans clé → affichés comme tels · historique partiel → profondeur réelle affichée · backtest < marché → affiché tel quel |
 
 ## Démarrage (0 €, 3 commandes)
@@ -79,15 +80,21 @@ aucune API payante. Elle est conçue pour **rester 100 % fonctionnelle sans rés
 > C'est un choix de transparence, pas une limitation : PRONO SPORT préfère l'abstention affichée
 > à la donnée inventée.
 
-## Déploiement (0 € — prêt dans le repo)
+## Déploiement (prêt dans le repo)
 
 | Où | Fichier | Pour qui |
 |---|---|---|
-| **Koyeb** (recommandé, 24/7) | `Dockerfile.koyeb` | le plus simple : déploiement depuis GitHub, 512 Mo RAM, **jamais de carte demandée en 0 €** dans la plupart des régions (sinon → HF) |
+| **Render** 👑 (choix retenu) | `render.yaml` (blueprint 1 clic) | **0 $ au démarrage** (instance Free 512 Mo) ; auto-déploiement à chaque push sur `main` ; guide pas-à-pas : `docs/09-GUIDE-RENDER.md` |
+| **Koyeb** (24/7) | `Dockerfile.koyeb` | alternative : déploiement depuis GitHub, 512 Mo RAM, gratuit dans la plupart des régions |
 | **Hugging Face Spaces** | `deploy/hf-space/Dockerfile` | alternative sans carte bancaire ; repo GitHub **déjà configuré** dans le fichier |
 | **docker compose** (VPS / machine perso) | `docker-compose.yml` + `backend/Dockerfile` | `docker compose up api` — SQLite persistant, option PostgreSQL |
 | **Installation locale / Termux** | `install.sh` | 1 commande : venv + base + ingestion + moteur |
 | **Site statique public (bonus)** | `.github/workflows/update-site.yml` | snapshot auto-mis-à-jour toutes les 6 h sur GitHub Pages (0 €) |
+
+**Honnêteté Render (détail dans `docs/09`)** : l'instance Free dort après 15 min d'inactivité
+(réveil 30-60 s) et n'a pas de disque persistant → à chaque redéploiement le **bootstrap auto**
+recompile les vraies données (~20-40 min). Toujours en ligne : Starter 7 $/mois ; persistance :
+disque 0,25 $/Go/mois. **Rien n'exige de payer au démarrage.**
 
 **Comportement au premier déploiement** : l'app démarre immédiatement (interface FR + API) avec
 « DONNÉE NON DISPONIBLE », puis le **bootstrap auto** remplit la base avec les vraies données
