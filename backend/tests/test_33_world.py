@@ -191,6 +191,34 @@ def test_worker_monde_enregistre_et_journalise():
 
 
 # ---------------------------------------------------------------------------
+# Parseur TSDB : backbone mondial (noms réels, jamais d'ID)
+# ---------------------------------------------------------------------------
+def test_tsdb_parse_ligue_hors_catalogue_nom_reel():
+    """Une ligue hors catalogue (backbone world) porte le NOM RÉEL du payload
+    (strLeague) et le PAYS (strCountry) — jamais son ID numérique (§1/§4)."""
+    from app.providers.thesportsdb import TheSportsDBProvider
+    p = TheSportsDBProvider()
+    payload = {"events": [{
+        "idEvent": "999", "strTimestamp": "2026-08-27T18:00:00",
+        "strLeague": "Egyptian Premier League", "strCountry": "Egypt",
+        "strHomeTeam": "Al Ahly", "strAwayTeam": "Zamalek",
+        "idHomeTeam": "1", "idAwayTeam": "2",
+        "strHomeTeamBadge": "https://x/a.png", "strAwayTeamBadge": "https://x/b.png",
+        "intHomeScore": None, "intAwayScore": None, "strStatus": "NS",
+        "strVenue": "Cairo Stadium", "strCity": "Cairo",
+    }]}
+    raws = list(p.parse(payload, league_id="99999"))  # ID inconnu du catalogue
+    assert len(raws) == 1
+    r = raws[0]
+    assert r.competition_name == "Egyptian Premier League", "nom réel attendu (pas l'ID)"
+    assert r.competition_area == "Egypt"
+    assert r.home.logo_url == "https://x/a.png"
+    assert r.away.logo_url == "https://x/b.png"
+    assert r.venue_city == "Cairo"
+    assert r.home_score is None  # « NS » → jamais de faux 0 (§1)
+
+
+# ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
 def test_cli_world_et_research():

@@ -21,7 +21,9 @@ from app.ingest.service import IngestReport, ingest_one
 from app.providers.base import OddsRef, RawFixture, TeamRef
 
 NOW = datetime(2026, 8, 26, 15, 0, tzinfo=timezone.utc)
-TODAY = datetime(2026, 8, 26, 18, 0, tzinfo=timezone.utc)
+# « Aujourd'hui 18 h » DYNAMIQUE : les tests dépendent de la date courante
+# (ex. run_weather ne traite que les matchs du jour) — jamais de date figée.
+TODAY = datetime.now(timezone.utc).replace(hour=18, minute=0, second=0, microsecond=0)
 
 
 # ---------------------------------------------------------------- helpers

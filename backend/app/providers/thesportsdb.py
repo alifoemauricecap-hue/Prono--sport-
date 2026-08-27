@@ -78,7 +78,7 @@ class TheSportsDBProvider(Provider):
         return self._get("search_all_teams.php", {"l": league_name})
 
     def parse(self, payload: dict, league_id: str, source_url: str | None = None) -> Iterable[RawFixture]:
-        canon, comp_name, area = LEAGUES.get(league_id, (league_id, league_id, None))
+        canon, comp_name, area = LEAGUES.get(league_id, (None, None, None))
         for e in payload.get("events") or []:
             kickoff = _parse_dt(e.get("strTimestamp"), e.get("dateEvent"))
             if kickoff is None:
@@ -88,24 +88,35 @@ class TheSportsDBProvider(Provider):
             if status in {"SCHEDULED", "UPCOMING", "POSTPONED", "CANCELLED"}:
                 hs, as_ = None, None  # jamais de faux 0 (§1)
             season_label = e.get("strSeason")
+            # Backbone MONDIAL : le payload eventsday porte le NOM RÉEL de la ligue
+            # et le PAYS par événement — une ligue hors catalogue ne doit jamais
+            # s'appeler son ID (transparence §1/§4).
+            ev_league = (e.get("strLeague") or "").strip() or comp_name or league_id
+            ev_area = (e.get("strCountry") or "").strip() or area
             yield RawFixture(
                 provider=PROVIDER,
                 provider_id=str(e.get("idEvent")),
                 provider_competition=league_id,
-                competition_name=comp_name,
-                competition_area=area,
+                competition_name=comp_name or ev_league,
+                competition_area=ev_area,
                 season_label=season_label,
                 kickoff_utc=kickoff,
                 kickoff_time_known=bool(e.get("strTimestamp")),
                 status=status,
                 home=TeamRef(name=(e.get("strHomeTeam") or "?").strip(),
-                             provider_id=str(e.get("idHomeTeam") or ""), country=area),
+                             provider_id=str(e.get("idHomeTeam") or ""),
+                             logo_url=e.get("strHomeTeamBadge") or None,
+                             country=ev_area or None),
                 away=TeamRef(name=(e.get("strAwayTeam") or "?").strip(),
-                             provider_id=str(e.get("idAwayTeam") or ""), country=area),
+                             provider_id=str(e.get("idAwayTeam") or ""),
+                             logo_url=e.get("strAwayTeamBadge") or None,
+                             country=ev_area or None),
                 home_score=hs,
                 away_score=as_,
                 venue=e.get("strVenue") or None,
+                venue_city=e.get("strCity") or None,
                 raw={"idEvent": e.get("idEvent"), "strStatus": e.get("strStatus"),
+                     "strLeague": e.get("strLeague"), "strCountry": e.get("strCountry"),
                      "strPoster": e.get("strPoster")},
                 source_url=source_url,
             )
