@@ -37,7 +37,7 @@ services:
         sync: false
     # Disque persistant (OPTIONNEL, payant 0,25 $/Go/mois) :
     # sans disque, le bootstrap auto recompile les vraies données au 1er démarrage
-    # (~20-40 min) — comportement honnête et prévu, jamais de données inventées.
+    # (~40-90 min, couverture mondiale) — comportement honnête et prévu, jamais de données inventées.
     # disk:
     #   name: prono-data
     #   mountPath: /data
