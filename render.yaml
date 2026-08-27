@@ -1,0 +1,44 @@
+# PRONO SPORT 3.0 — Blueprint RENDER (déploiement 1 clic)
+# Docs : https://render.com/docs/blueprint-spec
+#
+# Coûts (vérifiés sur render.com/pricing le 26/08/2026) :
+#   - instance Free : 0 $/mois (512 Mo RAM / 0.1 CPU) — mise en veille après 15 min d'inactivité
+#   - instance Starter : 7 $/mois (toujours en ligne) — optionnel
+#   - disque persistant : 0,25 $/Go/mois — optionnel (sans disque, la base se
+#     reconstruit toute seule au redémarrage grâce au bootstrap auto)
+services:
+  - type: web
+    name: prono-sport
+    runtime: docker
+    dockerPath: Dockerfile
+    plan: free
+    autoDeploy: true
+    healthCheckPath: /v1/health
+    envVars:
+      - key: PYTHONIOENCODING
+        value: utf-8
+      - key: DATABASE_URL
+        value: sqlite:////data/prono_sport.db
+      - key: AUTO_INGEST
+        value: "1"
+      - key: AUTO_INGEST_SECONDS
+        value: "300"
+      - key: AUTO_LIVE
+        value: "1"
+      - key: AUTO_LIVE_SECONDS
+        value: "75"
+      - key: AUTO_COMPUTE
+        value: "1"
+      - key: AUTO_COMPUTE_SECONDS
+        value: "3600"
+      # Secret : à renseigner dans le dashboard Render (Settings → Environment).
+      # Protège POST /v1/admin/sync/* et GET /v1/admin/backup (en-tête x-admin-token).
+      - key: ADMIN_TOKEN
+        sync: false
+    # Disque persistant (OPTIONNEL, payant 0,25 $/Go/mois) :
+    # sans disque, le bootstrap auto recompile les vraies données au 1er démarrage
+    # (~20-40 min) — comportement honnête et prévu, jamais de données inventées.
+    # disk:
+    #   name: prono-data
+    #   mountPath: /data
+    #   sizeGB: 10

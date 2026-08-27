@@ -14,29 +14,35 @@ Scheduler optionnel : AUTO_INGEST=1 → ré-ingestion ESPN périodique + vérifi
 from __future__ import annotations
 
 import asyncio
+import json
 import os
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
-from fastapi import FastAPI, Query
+from fastapi import FastAPI, Header, Query
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from sqlalchemy.orm import Session, joinedload
 
 from .config import DATABASE_URL
-from .db.base import Base, make_engine, make_session_factory
+from .db.base import make_engine, make_session_factory, ensure_schema
 from .db.models import (
     Bookmaker,
     Competition,
     Fixture,
     Market,
+    Notification,
     OddsSnapshot,
     Prediction,
+    PredictionResult,
     ProviderHealth,
     Team,
     TeamAnalytics,
     ValueBet,
 )
+
+from .realtime import BUS, emit
 
 STATIC_DIR = Path(__file__).parent / "static"
 
@@ -45,11 +51,52 @@ UPCOMING_STATUSES = {"SCHEDULED", "UPCOMING", "LINEUPS_PENDING", "LINEUPS_CONFIR
 FINISHED_STATUSES = {"FINISHED"}
 
 ENGINE = make_engine(DATABASE_URL)
-Base.metadata.create_all(ENGINE)
+ensure_schema(ENGINE)  # crée les tables 3.0 + migre les bases 2.0 (colonnes manquantes)
 SF = make_session_factory(ENGINE)
 
-app = FastAPI(title="PRONO SPORT API", version="0.2.0", docs_url="/v1/docs")
-app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["GET"], allow_headers=["*"])
+app = FastAPI(title="PRONO SPORT API", version="3.0.0-alpha", docs_url="/v1/docs")
+app.add_middleware(CORSMiddleware, allow_origins=["*"],
+                   allow_methods=["GET", "POST", "OPTIONS"], allow_headers=["*"])
+
+# =============================================================================
+# PHASE 19 — SÉCURITÉ : rate limiting (0 €, mémoire, par IP)
+# Le flux SSE /v1/events est exempté (connexion longue par nature).
+# =============================================================================
+from collections import deque
+
+from starlette.responses import PlainTextResponse
+
+RATE_LIMIT_PER_MIN = 300
+RATE_WINDOW_S = 60
+_RATE_BUCKETS: dict[str, deque] = {}
+
+
+def _rate_limit_check(path: str, ip: str) -> bool:
+    """Fenêtre glissante par IP — True = autorisé. /v1/events est exempté (SSE)."""
+    if not path.startswith("/v1") or path == "/v1/events":
+        return True
+    now = time.monotonic()
+    dq = _RATE_BUCKETS.setdefault(ip, deque())
+    while dq and now - dq[0] > RATE_WINDOW_S:
+        dq.popleft()
+    if len(dq) >= RATE_LIMIT_PER_MIN:
+        return False
+    dq.append(now)
+    return True
+
+
+@app.middleware("http")
+async def _rate_limit(request, call_next):
+    ip = request.client.host if request.client else "inconnu"
+    if not _rate_limit_check(request.url.path, ip):
+        return PlainTextResponse(
+            f"429 — TROP DE REQUÊTES (limite : {RATE_LIMIT_PER_MIN}/min par IP). Ralentissez.",
+            status_code=429)
+    return await call_next(request)
+
+# Frontend statique (style.css, app.js, images) — servi par l'API (1 seul déploiement, 0 €)
+from fastapi.staticfiles import StaticFiles
+app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 STATUS_RANK = {"VERIFIED": 2, "UNVERIFIED": 1, "CONTRADICTORY": 0, "INSUFFICIENT_SAMPLE": 1}
 
@@ -455,6 +502,97 @@ def list_competitions() -> JSONResponse:
         return JSONResponse({"competitions": out})
 
 
+@app.get("/v1/world")
+def world_coverage() -> JSONResponse:
+    """COUVERTURE MONDIALE — catalogue des ligues + état RÉEL de la base par ligue.
+
+    Architecture 0 € : catalogue ESPN (haute qualité) + backbone TheSportsDB
+    `eventsday` (TOUS les matchs du monde en 1 requête/jour) + fduk (historique
+    profond). Chaque ligue affiche sa couverture réelle — jamais supposée.
+    """
+    from sqlalchemy import func
+    from .world import WORLD_LEAGUES, CONFEDERATIONS
+    with SF() as s:
+        from sqlalchemy import select
+        comps = {c.code: c for c in s.query(Competition).all()}
+        # compteurs réels par compétition (select + group_by explicite)
+        counts = {code: n for code, n in s.execute(
+            select(Competition.code, func.count(Fixture.id))
+            .join(Fixture, Fixture.competition_id == Competition.id)
+            .group_by(Competition.code)).all()}
+        from .db.models import LeagueResearch
+        research_done = {r[0] for r in
+                         s.query(LeagueResearch.competition_id).distinct().all()}
+
+        def comp_payload(meta, comp) -> dict:
+            in_db = comp is not None
+            n = counts.get(meta.code, 0)
+            return {
+                "code": meta.code, "name": meta.name, "country": meta.country,
+                "conf": meta.conf, "level": meta.level, "espn": meta.espn,
+                "verified": meta.status,
+                "in_db": in_db,
+                "fixtures": n,
+                "research": ("OK" if (in_db and comp.id in research_done)
+                             else ("POSSIBLE" if in_db else "PENDING")),
+            }
+
+        # 1) ligues du catalogue (ESPN)
+        leagues = [comp_payload(m, comps.get(m.code)) for m in WORLD_LEAGUES]
+        # 2) compétitions présentes en base MAIS hors catalogue (légues découvertes
+        #    par le backbone world TSDB / fduk) — elles font partie de la couverture
+        extra = []
+        for code, comp in sorted(comps.items()):
+            if code not in {m.code for m in WORLD_LEAGUES}:
+                extra.append(comp_payload(
+                    type("M", (), {"code": code, "name": comp.name,
+                                   "country": comp.area or "?", "conf": "AUTRE",
+                                   "level": 1, "espn": None, "status": "DÉCOUVERTE"})(),
+                    comp))
+        out = leagues + extra
+        by_conf: dict[str, int] = {}
+        for o in out:
+            by_conf[o["conf"]] = by_conf.get(o["conf"], 0) + 1
+        return JSONResponse({
+            "leagues": out,
+            "extra_competitions": [o["code"] for o in extra],
+            "totals": {
+                "catalog": len(leagues),
+                "covered": sum(1 for o in out if o["in_db"] and o["fixtures"] > 0),
+                "fixtures": sum(counts.values()),
+                "competitions_in_db": len(comps),
+            },
+            "by_confederation": {c: by_conf.get(c, 0) for c in CONFEDERATIONS}
+                               | {k: v for k, v in by_conf.items() if k not in CONFEDERATIONS},
+            "backbone_world": "TheSportsDB eventsday (toutes les ligues du monde, 1 requête/jour, 0 €)",
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+        })
+
+
+@app.get("/v1/competitions/{code}/research")
+def competition_research(code: str, refresh: bool = False) -> JSONResponse:
+    """Recherche approfondie d'une LIGUE (Wikipedia FR/EN, CC BY-SA, 0 €).
+
+    SOURCE → dossier réel (titre, extrait, article, licence) ·
+    UNAVAILABLE → « DONNÉE INDISPONIBLE » (réseau coupé ou article absent).
+    """
+    from .research.league import league_research
+    with SF() as s:
+        comp = s.query(Competition).filter_by(code=code).one_or_none()
+        if comp is None:
+            # ligue du catalogue pas encore en base → on crée la compétition
+            # (code canonique) pour pouvoir rattacher la recherche
+            from .world import code_meta
+            meta = code_meta(code)
+            if meta is None:
+                return JSONResponse({"error": f"compétition inconnue: {code}"}, status_code=404)
+            comp = Competition(code=meta.code, name=meta.name, area=meta.country)
+            s.add(comp)
+            s.commit()
+        s.refresh(comp)
+        return JSONResponse(league_research(s, comp, refresh=refresh))
+
+
 @app.get("/v1/teams/{team_id}")
 def get_team(team_id: int) -> JSONResponse:
     with SF() as s:
@@ -550,92 +688,631 @@ def pack_zip() -> FileResponse:
     return FileResponse(p, media_type="application/zip", filename="prono-sport-code.zip")
 
 
-# --- Scheduler live (§43 : fréquence réelle, latence affichée) ---
-async def _auto_ingest_loop() -> None:  # pragma: no cover - boucle de fond
-    from .ingest.consistency import run_consistency, sweep_stale
-    from .ingest.service import run_ingestion
-    from .providers.registry import get_provider
-    interval = int(os.environ.get("AUTO_INGEST_SECONDS", "120"))
-    # monde entier par défaut (55 ligues validées) — surchargé via env si on veut cibler
-    from .providers import espn as espn_mod
-    leagues = os.environ.get("AUTO_INGEST_LEAGUES", " ".join(espn_mod.AUTO_WATCH_LEAGUES)).split()
-    from datetime import timedelta as _td
-    while True:
-        await asyncio.sleep(interval)
+# =============================================================================
+# PRONO SPORT 3.0 — NOUVEAUX ENDPOINTS
+# =============================================================================
+
+@app.get("/v1/health")
+def health() -> JSONResponse:
+    """Santé globale de la plateforme (API + base + sources)."""
+    from .db.models import DataSource
+    with SF() as s:
+        sources = s.query(DataSource).count()
         try:
-            provider = get_provider("espn")
-            # hier/aujourd'hui/demain → les statuts des matchs joués sont rafraîchis (§ fraîcheur)
-            days = [(datetime.now(timezone.utc) + _td(days=d)).strftime("%Y%m%d") for d in (-1, 0, 1)]
-            with SF() as s:
-                for league in leagues:
-                    for day in days:
-                        payload = provider.fetch(league=league, date=day)
-                        raws = list(provider.parse(payload, league=league,
-                                                   source_url=provider.scoreboard_url(league)))
-                        run_ingestion(s, provider, raws)
-                sweep_stale(s)   # statuts périmés → UNKNOWN jusqu'à re-vérification (§1)
-                run_consistency(s)
+            n_fixtures = s.query(Fixture).count()
         except Exception:
-            pass  # un échec de cycle ne doit jamais tuer le serveur (§64) ; provider_health garde la trace
+            n_fixtures = -1
+    return JSONResponse({
+        "status": "OK",
+        "api": "prono-sport:3.0-alpha",
+        "db": "OK" if n_fixtures >= 0 else "ERREUR",
+        "sources_registered": sources,
+        "sse_clients": BUS.n_subscribers,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+    })
 
 
-async def _live_fast_loop() -> None:  # pragma: no cover - M6 : rafraîchissement LIVE rapide
-    """Tant qu'un match est EN COURS en base : refresh ESPN de SES ligues seulement,
-    toutes les AUTO_LIVE_SECONDS (défaut 75 s). Sans match live → la boucle dort (0 requête)."""
+@app.get("/v1/sources")
+def sources() -> JSONResponse:
+    """§62 SOURCE MONITOR — registre des sources : statut, fiabilité, dernière sync,
+    erreurs, latence, catégories, conditions d'utilisation."""
+    from .db.models import DataSource, SyncJob
+    from .discovery.catalog import CATEGORIES_FR
+    from .discovery.engine import legacy_name
+    with SF() as s:
+        ph = {h.provider: h for h in s.query(ProviderHealth).all()}
+        last_jobs = {}
+        for j in s.query(SyncJob).order_by(SyncJob.started_at.desc()).limit(200).all():
+            last_jobs.setdefault(j.provider or j.worker, j)
+        out = []
+        for src in s.query(DataSource).order_by(DataSource.name).all():
+            health_row = ph.get(src.name) or ph.get(legacy_name(src.name) or "")
+            out.append({
+                "name": src.name,
+                "kind": src.kind,
+                "status": src.status,
+                "availability": src.availability_status or (health_row.status if health_row else "UNKNOWN"),
+                "reliability": src.reliability_score,
+                "reliability_note": None if src.reliability_score is not None
+                                     else "non mesurée — historique insuffisant (jamais inventée)",
+                "categories": [CATEGORIES_FR.get(c, c) for c in (src.data_categories or [])],
+                "coverage": src.coverage,
+                "update_frequency": src.update_frequency,
+                "terms_status": src.terms_status,
+                "attribution_required": src.attribution_required,
+                "requires_key": src.requires_key,
+                "latency_ms": health_row.latency_ms if health_row else None,
+                "detail": health_row.detail if health_row else None,
+                "checked_at": _iso(health_row.checked_at) if health_row else None,
+                "last_successful": _iso(src.last_successful_fetch),
+                "last_failed": _iso(src.last_failed_fetch),
+                "last_job": _iso(last_jobs[src.name].started_at) if src.name in last_jobs else None,
+            })
+        return JSONResponse({"sources": out,
+                             "note": "Fiabilité calculée sur l'observé (sync_jobs) — jamais inventée."})
+
+
+@app.get("/v1/sync-jobs")
+def sync_jobs(limit: int = Query(50, le=500)) -> JSONResponse:
+    """§63 Admin — journal des workers (idempotence, erreurs, latence)."""
+    from .db.models import SyncJob
+    with SF() as s:
+        rows = s.query(SyncJob).order_by(SyncJob.started_at.desc()).limit(limit).all()
+        return JSONResponse({"jobs": [{
+            "id": j.id, "worker": j.worker, "provider": j.provider, "status": j.status,
+            "records": j.records, "created": j.created, "updated": j.updated,
+            "rejected": j.rejected, "latency_ms": j.latency_ms, "errors": j.errors,
+            "started_at": _iso(j.started_at), "finished_at": _iso(j.finished_at),
+        } for j in rows]})
+
+
+@app.get("/v1/quality")
+def quality(refresh: bool = False) -> JSONResponse:
+    """§47/§61 COVERAGE CENTER — qualité de données par compétition (calculée)."""
+    from .analytics.quality import compute_quality
+    with SF() as s:
+        data = compute_quality(s) if refresh else _quality_cache(s)
+    return JSONResponse({"quality": list(data.values()),
+                         "note": "Score calculé sur l'état réel de la base (couverture, "
+                                 "vérification croisée, sources, historique, fraîcheur)."})
+
+
+def _quality_cache(s) -> dict:
+    """Qualité en cache si computed_at < 30 min, sinon recalcul (pas de surcharge)."""
+    from datetime import timedelta
+    from .db.models import DataQuality
+    rows = s.query(DataQuality).all()
+    fresh = [r for r in rows
+             if r.computed_at and (datetime.now(timezone.utc)
+                                   - _as_utc(r.computed_at)) < timedelta(minutes=30)]
+    if fresh:
+        out = {}
+        for r in fresh:
+            c = s.get(Competition, r.competition_id)
+            out[c.code] = {"code": c.code, "name": c.name, "score": r.score,
+                           "fixtures": r.fixtures, "verified_pct": r.verified_pct,
+                           "n_sources": r.n_sources, "history_from": r.history_from,
+                           "history_to": r.history_to, "freshness_min": r.freshness_min,
+                           "missing": r.missing}
+        return out
+    from .analytics.quality import compute_quality
+    return compute_quality(s)
+
+
+def _as_utc(dt: datetime) -> datetime:
+    return dt.replace(tzinfo=timezone.utc) if dt.tzinfo is None else dt
+
+
+@app.get("/v1/fixtures/{fixture_id}/events")
+def fixture_events(fixture_id: int) -> JSONResponse:
+    """§16/§52 — événements du match (buts dérivés de deltas de score réels, statuts)."""
+    from .db.models import FixtureEvent, Team
+    with SF() as s:
+        if s.get(Fixture, fixture_id) is None:
+            return JSONResponse({"error": "match inconnu"}, status_code=404)
+        teams = {t.id: t for t in s.query(Team).all()}
+        rows = (s.query(FixtureEvent)
+                .filter(FixtureEvent.fixture_id == fixture_id)
+                .order_by(FixtureEvent.created_at.asc()).all())
+        return JSONResponse({"events": [{
+            "minute": e.minute, "type": e.type,
+            "team": teams.get(e.team_id).name if e.team_id else None,
+            "detail": e.detail, "origin": e.origin,
+            "created_at": _iso(e.created_at),
+        } for e in rows],
+        "note": "Buts : DERIVED = déduits d'un changement de score réel observé (jamais inventés)."})
+
+
+@app.get("/v1/fixtures/{fixture_id}/stats")
+def fixture_stats(fixture_id: int) -> JSONResponse:
+    """§52 — statistiques d'équipe du match (source réelle si disponible)."""
+    from .db.models import Team, TeamStat
+    with SF() as s:
+        if s.get(Fixture, fixture_id) is None:
+            return JSONResponse({"error": "match inconnu"}, status_code=404)
+        teams = {t.id: t for t in s.query(Team).all()}
+        rows = s.query(TeamStat).filter(TeamStat.fixture_id == fixture_id).all()
+        out = []
+        for st in rows:
+            t = teams.get(st.team_id)
+            out.append({
+                "team": t.name if t else "?",
+                "possession": st.possession, "tirs": st.shots,
+                "tirs_cadres": st.shots_on_target, "corners": st.corners,
+                "fautes": st.fouls, "cartons": st.yellow_cards,
+                "source": st.source, "as_of": _iso(st.as_of),
+            })
+        if not out:
+            return JSONResponse({"stats": [], "status": "DONNÉE INDISPONIBLE",
+                                 "note": "Aucune statistique de match fournie par une source active."})
+        return JSONResponse({"stats": out, "status": "AVAILABLE"})
+
+
+@app.get("/v1/reports/{fixture_id}")
+def fixture_report(fixture_id: int, refresh: bool = False) -> JSONResponse:
+    """§46 EXPERT MATCH REPORT — recherche approfondie multi-sources (0 €)."""
+    from .research.engine import build_expert_report, report_freshness
+    with SF() as s:
+        try:
+            rep = build_expert_report(s, fixture_id, refresh=refresh)
+        except ValueError:
+            return JSONResponse({"error": "match inconnu"}, status_code=404)
+        rep["freshness"] = report_freshness(rep.get("generated_at"))
+        return JSONResponse(rep)
+
+
+@app.get("/v1/search")
+def search(q: str = Query(..., min_length=2, description="recherche globale (fr)")) -> JSONResponse:
+    """§81 — recherche globale : équipes, compétitions, matchs (base) + web (Wikipedia, 0 €)."""
+    from .research.search import search_global
+    with SF() as s:
+        return JSONResponse(search_global(s, q))
+
+
+@app.get("/v1/fixtures/{fixture_id}/report")
+def fixture_report_alt(fixture_id: int, refresh: bool = False) -> JSONResponse:
+    """Alias de /v1/reports/{id} (convenance frontend)."""
+    return fixture_report(fixture_id, refresh=refresh)
+
+
+@app.get("/v1/backtest")
+def backtest(refresh: bool = False) -> JSONResponse:
+    """§35/§36 BACKTEST LAB — walk-forward sur données réelles : Brier/LogLoss,
+    top-1 accuracy, et comparaison modèle vs MARCHÉ (cotes réelles, marge retirée).
+    Séparation BACKTEST / PAPER TRACKING / LIVE (§55) : ici, uniquement le backtest."""
+    from datetime import timedelta
+    from .ml.backtest import load_last_backtest, run_backtest
+    with SF() as s:
+        rep = None if refresh else load_last_backtest(s)
+        if rep is None or _stale_backtest(rep):
+            rep = run_backtest(s)
+        return JSONResponse({
+            **rep,
+            "note_global": ("Interprétation honnête : sur cet échantillon, le marché "
+                            "réel est souvent plus calibré que le modèle — celui-ci "
+                            "s'améliore avec plus d'historique (saisons complètes). "
+                            "C'est exactement pourquoi les value bets restent prudemment "
+                            "limitées (NO QUALIFIED PICK fréquent, jamais de pick forcé)."),
+        })
+
+
+def _stale_backtest(rep: dict) -> bool:
+    from datetime import timedelta
+    try:
+        dt = datetime.fromisoformat(rep.get("generated_at", ""))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return (datetime.now(timezone.utc) - dt) > timedelta(hours=6)
+    except ValueError:
+        return True
+
+
+@app.get("/v1/predictions/results")
+def prediction_results(limit: int = Query(50, le=500)) -> JSONResponse:
+    """§54 — résultats des pronostics APRÈS les matchs (WIN/LOSS/VOID/PENDING).
+    La prédiction originale est conservée telle quelle (résolution non-destructive)."""
+    from .db.models import PredictionResult, Team
+    with SF() as s:
+        rows = (s.query(PredictionResult)
+                .order_by(PredictionResult.resolved_at.desc()).limit(limit).all())
+        out = []
+        for r in rows:
+            fx = s.get(Fixture, r.fixture_id)
+            if fx is None:
+                continue
+            h = s.get(Team, fx.home_team_id)
+            a = s.get(Team, fx.away_team_id)
+            out.append({
+                "fixture_id": r.fixture_id,
+                "home": h.name if h else "?", "away": a.name if a else "?",
+                "market": r.market, "selection": r.selection,
+                "actual": r.actual, "result": r.result,
+                "final_score": r.final_score,
+                "resolved_at": _iso(r.resolved_at),
+            })
+        return JSONResponse({"count": len(out), "results": out})
+
+
+@app.get("/v1/events")
+async def sse_events() -> StreamingResponse:
+    """Temps réel : pousse buts, statuts, value bets, sources, jobs (SSE)."""
+    q = BUS.subscribe()
+
+    async def gen():
+        try:
+            yield f"event: hello\ndata: {json.dumps({'type': 'CONNECTED', 'ts': time.time()})}\n\n"
+            while True:
+                try:
+                    ev = await asyncio.wait_for(q.get(), timeout=25)
+                    yield f"event: {ev.get('type', 'msg')}\ndata: {json.dumps(ev, ensure_ascii=False)}\n\n"
+                except asyncio.TimeoutError:
+                    yield f"event: ping\ndata: {json.dumps({'type': 'HEARTBEAT'})}\n\n"
+        finally:
+            BUS.unsubscribe(q)
+
+    return StreamingResponse(gen(), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+
+@app.get("/v1/notifications")
+def notifications(limit: int = Query(30, le=200)) -> JSONResponse:
+    """§83 — notifications réelles (événements observés en base)."""
+    with SF() as s:
+        rows = (s.query(Notification)
+                .filter(Notification.user == "local")
+                .order_by(Notification.created_at.desc()).limit(limit).all())
+        return JSONResponse({"notifications": [{
+            "id": n.id, "type": n.type, "fixture_id": n.fixture_id,
+            "message": n.message, "read": n.read, "created_at": _iso(n.created_at),
+        } for n in rows]})
+
+
+@app.post("/v1/notifications/read")
+def mark_notifications_read() -> JSONResponse:
+    with SF() as s:
+        rows = s.query(Notification).filter(Notification.user == "local",
+                                            Notification.read == False).all()  # noqa: E712
+        for n in rows:
+            n.read = True
+        s.commit()
+        return JSONResponse({"marked": len(rows)})
+
+
+@app.post("/v1/admin/sync/{worker}")
+def admin_sync(worker: str, x_admin_token: str | None = Header(default=None, alias="x-admin-token")) -> JSONResponse:
+    """§63 Admin — déclenche un worker à la demande (optionnel : ADMIN_TOKEN, en-tête x-admin-token)."""
+    import os
+    expected = os.environ.get("ADMIN_TOKEN")
+    if expected and x_admin_token != expected:
+        return JSONResponse({"error": "token admin invalide"}, status_code=403)
+    from .workers import definitions as W
+    handlers = {
+        "syncFixtures": lambda s: W.run_fixtures(s),
+        "syncLiveMatches": lambda s: W.run_live(s),
+        "syncResults": lambda s: W.run_results(s),
+        "syncWorldDaily": lambda s: W.run_world_daily(s),
+        "syncLineups": lambda s: W.run_lineups(s),
+        "syncOddsLive": lambda s: W.run_odds_live(s),
+        "syncWeather": lambda s: W.run_weather(s),
+        "syncHistorical": lambda s: W.run_historical(s),
+        "discoverSources": lambda s: W.run_discover(s, offline=False),
+    }
+    if worker not in handlers:
+        return JSONResponse({"error": f"worker inconnu: {worker}",
+                             "workers": list(handlers)}, status_code=404)
+    try:
+        with SF() as s:
+            result = handlers[worker](s)
+        emit("SYNC_DONE", worker=worker, result=result)
+        return JSONResponse(result)
+    except Exception as exc:
+        return JSONResponse({"error": f"{type(exc).__name__}: {exc}"}, status_code=500)
+
+
+@app.get("/v1/admin/overview")
+def admin_overview() -> JSONResponse:
+    """§63 ADMIN — vue d'ensemble de la plateforme (état RÉEL de la base)."""
+    from sqlalchemy import func
+    from .db.models import AnalysisReport, SyncJob
+    with SF() as s:
+        # select() + group_by explicite : le Query legacy (colonne + agrégat) n'émet
+        # PAS de GROUP BY → SQLite retournerait le statut d'une ligne arbitraire.
+        from sqlalchemy import select
+        by_status = {st: n for st, n in
+                     s.execute(select(Fixture.status, func.count(Fixture.id))
+                               .group_by(Fixture.status)).all()}
+        last_sync: dict[str, dict] = {}
+        for r in s.query(SyncJob).order_by(SyncJob.id.desc()).all():
+            if r.worker not in last_sync:
+                last_sync[r.worker] = {"status": r.status, "records": r.records,
+                                       "at": r.finished_at.isoformat() if r.finished_at else None}
+        return JSONResponse({
+            "api": "prono-sport:3.0-alpha",
+            "fixtures": {"total": s.query(Fixture).count(), "by_status": by_status},
+            "competitions": s.query(Competition).count(),
+            "predictions": s.query(Prediction).count(),
+            "value_bets": s.query(ValueBet).count(),
+            "reports": s.query(AnalysisReport).count(),
+            "sse_clients": BUS.n_subscribers,
+            "last_sync": last_sync,
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+        })
+
+
+@app.get("/v1/admin/errors")
+def admin_errors() -> JSONResponse:
+    """§63 ADMIN — jobs de sync en erreur ou avec rejets (réels, table sync_jobs)."""
+    from .db.models import SyncJob
+    with SF() as s:
+        rows = (s.query(SyncJob)
+                .filter((SyncJob.status == "FAILED") | (SyncJob.rejected > 0)
+                        | SyncJob.errors.isnot(None))
+                .order_by(SyncJob.id.desc()).limit(30).all())
+        return JSONResponse({
+            "errors": [{"worker": r.worker, "provider": r.provider, "status": r.status,
+                        "records": r.records, "rejected": r.rejected, "errors": r.errors,
+                        "latency_ms": r.latency_ms,
+                        "finished_at": r.finished_at.isoformat() if r.finished_at else None}
+                       for r in rows],
+            "note": "Enregistrements réels de sync_jobs — liste vide = aucune erreur, rien n'est masqué."})
+
+
+@app.get("/v1/admin/backup")
+def admin_backup(x_admin_token: str | None = Header(default=None, alias="x-admin-token")):
+    """§63/§78 ADMIN — téléchargement d'une sauvegarde SQLite COHÉRENTE (sqlite3.backup)."""
+    import sqlite3
+    import tempfile
+    from fastapi.responses import Response
+    expected = os.environ.get("ADMIN_TOKEN")
+    if expected and x_admin_token != expected:
+        return Response("403 — token admin invalide (en-tête x-admin-token)", status_code=403)
+    if not DATABASE_URL.startswith("sqlite:///"):
+        return Response("400 — backup via cet endpoint réservé à SQLite (Postgres : pg_dump)",
+                        status_code=400)
+    src_path = DATABASE_URL.replace("sqlite:///", "", 1)
+    tmp = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
+    tmp.close()
+    try:
+        src = sqlite3.connect(src_path)
+        dst = sqlite3.connect(tmp.name)
+        with dst:
+            src.backup(dst)
+        src.close()
+        dst.close()
+        with open(tmp.name, "rb") as f:
+            data = f.read()
+    finally:
+        os.unlink(tmp.name)
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+    return Response(content=data, media_type="application/x-sqlite3",
+                    headers={"Content-Disposition": f'attachment; filename="prono-sport-{stamp}.db"'})
+
+
+# --- Scheduler live 3.0 (§43 : workers nommés, journalisés, événements SSE) ---
+
+def _live_cycle() -> dict:
+    """Cycle live SYNCHRONE (exécuté en thread) :
+    1. état avant (scores + statuts des matchs concernés)
+    2. ingestion ESPN ciblée (ligues live + départs imminents)
+    3. détection d'événements (buts dérivés, transitions) → FixtureEvent + Notification
+    4. résolution des pronostics des matchs terminés (WIN/LOSS/VOID, non-destructif)
+    5. push SSE à tous les clients
+    """
+    from datetime import timedelta
     from .db.models import EntityMapping
     from .ingest.consistency import run_consistency
     from .ingest.service import run_ingestion
     from .providers.registry import get_provider
+    from .live.events import detect_events, resolve_predictions
+
+    with SF() as s:
+        now = datetime.now(timezone.utc)
+        # (a) ligues avec match en cours ; (b) départs imminents (−60 min → +30 min)
+        live_comps = {fx.competition_id for fx in s.query(Fixture).filter(
+            Fixture.status.in_(list(LIVE_STATUSES))).all()}
+        soon = (s.query(Fixture)
+                .filter(Fixture.kickoff_utc >= now - timedelta(hours=1),
+                        Fixture.kickoff_utc <= now + timedelta(minutes=30))
+                .all())
+        soon_comps = {f.competition_id for f in soon}
+        comps = live_comps | soon_comps
+        if not comps:
+            return {"slugs": 0, "events": []}
+        slug_map = {m.entity_id: m.provider_id for m in s.query(EntityMapping).filter(
+            EntityMapping.entity_type == "competition",
+            EntityMapping.provider == "espn").all()}
+        slugs = {slug_map[c] for c in comps if c in slug_map}
+
+        # état AVANT (tous les matchs de ces compétitions, joués ou à venir proche)
+        before: dict[int, tuple] = {}
+        for fx in s.query(Fixture).filter(Fixture.competition_id.in_(list(comps))).all():
+            before[fx.id] = ((fx.home_score, fx.away_score), fx.status)
+
+        provider = get_provider("espn")
+        day = now.strftime("%Y%m%d")
+        for slug in slugs:
+            try:
+                payload = provider.fetch(league=slug, date=day)
+                raws = list(provider.parse(payload, league=slug,
+                                           source_url=provider.scoreboard_url(slug)))
+                run_ingestion(s, provider, raws)
+            except Exception:
+                continue  # §64 : une ligue en échec ne bloque pas les autres
+        run_consistency(s)
+
+        # détection + résolution
+        events_all: list[dict] = []
+        for fx in s.query(Fixture).filter(Fixture.id.in_(list(before.keys()) or [0])).all():
+            prev_score, prev_status = before[fx.id]
+            evs = detect_events(s, fx, prev_score, prev_status)
+            for ev in evs:
+                events_all.append(ev)
+                emit("LIVE", **ev)
+            if fx.status == "FINISHED" and prev_status != "FINISHED":
+                r = resolve_predictions(s, fx)
+                if r.get("resolved"):
+                    emit("PREDICTION_RESOLVED", **r)
+        return {"slugs": len(slugs), "events": events_all}
+
+
+def _fixtures_cycle() -> dict:
+    """Cycle fixtures/résultats (5 min) : worker syncFixtures (ESPN + fduk cotes)."""
+    from .workers.definitions import run_fixtures
+    with SF() as s:
+        return run_fixtures(s)
+
+
+def _compute_cycle() -> dict:
+    """Recalcule analytics + prédictions + value bets + qualité (1 h par défaut)."""
+    from .analytics.engine import compute_all
+    from .analytics.quality import compute_quality
+    from .ml.engine import predict_upcoming
+    from .db.models import ValueBet, Fixture
+    with SF() as s:
+        before_ids = {v.id for v in s.query(ValueBet).filter(
+            ValueBet.level.in_(["QUALIFIED", "STRONG"])).all()}
+        compute_all(s)
+        reports = predict_upcoming(s)
+        compute_quality(s)
+        new = (s.query(ValueBet).filter(
+            ValueBet.level.in_(["QUALIFIED", "STRONG"])).all())
+        for v in new:
+            if v.id not in before_ids:
+                fx = s.get(Fixture, v.fixture_id)
+                if fx:
+                    from .db.models import Team
+                    h, a = s.get(Team, fx.home_team_id), s.get(Team, fx.away_team_id)
+                    emit("VALUE_BET", fixture_id=fx.id,
+                         home=h.name if h else "?", away=a.name if a else "?",
+                         market=v.market, selection=v.selection, level=v.level,
+                         ev_pct=round(v.ev * 100, 1))
+        return {"predictions": sum(r.predictions for r in reports),
+                "value_bets_new": len([v for v in new if v.id not in before_ids])}
+
+
+async def _auto_ingest_loop() -> None:  # pragma: no cover - boucle de fond
+    interval = int(os.environ.get("AUTO_INGEST_SECONDS", "300"))
+    while True:
+        await asyncio.sleep(interval)
+        try:
+            res = await asyncio.to_thread(_fixtures_cycle)
+            emit("SYNC_DONE", worker="syncFixtures", result=res)
+        except Exception:
+            pass  # §64 : un échec de cycle ne doit jamais tuer le serveur
+
+
+async def _world_daily_loop() -> None:  # pragma: no cover - backbone mondial 1 h
+    from .workers.definitions import run_world_daily
+    interval = int(os.environ.get("WORLD_SECONDS", "3600"))
+    await asyncio.sleep(90)  # laisse le bootstrap respirer
+    while True:
+        try:
+            def _w() -> dict:
+                with SF() as s:
+                    return run_world_daily(s)
+            res = await asyncio.to_thread(_w)
+            emit("SYNC_DONE", worker="syncWorldDaily", result=res)
+        except Exception:
+            pass  # §64 : un échec ne doit jamais tuer le serveur
+        await asyncio.sleep(interval)
+
+
+async def _live_fast_loop() -> None:  # pragma: no cover - M6 : rafraîchissement LIVE rapide
     interval = int(os.environ.get("AUTO_LIVE_SECONDS", "75"))
     while True:
         await asyncio.sleep(interval)
         try:
-            provider = get_provider("espn")
-            with SF() as s:
-                live_comps = {fx.competition_id for fx in s.query(Fixture).filter(
-                    Fixture.status.in_(list(LIVE_STATUSES))).all()}
-                if not live_comps:
-                    continue
-                slugs = [m.provider_id for m in s.query(EntityMapping).filter(
-                    EntityMapping.entity_type == "competition",
-                    EntityMapping.provider == "espn").all()
-                    if m.entity_id in live_comps]
-                day = datetime.now(timezone.utc).strftime("%Y%m%d")
-                for slug in slugs:
-                    payload = provider.fetch(league=slug, date=day)
-                    raws = list(provider.parse(payload, league=slug,
-                                               source_url=provider.scoreboard_url(slug)))
-                    run_ingestion(s, provider, raws)
-                run_consistency(s)
+            res = await asyncio.to_thread(_live_cycle)
+            if res.get("events"):
+                emit("LIVE_BURST", events=res["events"])
         except Exception:
-            pass  # §64 : la boucle live ne doit jamais tuer l'API
+            pass
 
 
 async def _auto_compute_loop() -> None:  # pragma: no cover - boucle de fond
-    """Recalcule analytics + prédictions/value bets toutes les AUTO_COMPUTE_SECONDS (défaut 3600 s).
-    Indispensable sur un serveur 24/7 : sans ça, les pronos restent figés alors que les cotes
-    réelles bougent (§35 : la value doit être recalculée sur les dernières cotes)."""
     interval = int(os.environ.get("AUTO_COMPUTE_SECONDS", "3600"))
-    await asyncio.sleep(90)  # laisse le démarrage/bootstrap respirer
+    await asyncio.sleep(60)  # laisse le démarrage/bootstrap respirer
     while True:
         try:
-            def _compute() -> None:
-                from .analytics.engine import compute_all
-                from .ml.engine import predict_upcoming
-                with SF() as s:
-                    compute_all(s)
-                    predict_upcoming(s)
-            await asyncio.to_thread(_compute)
+            res = await asyncio.to_thread(_compute_cycle)
+            emit("SYNC_DONE", worker="compute", result=res)
         except Exception:
-            pass  # §64 : un échec de recalcul ne doit jamais tuer l'API
+            pass
+        await asyncio.sleep(interval)
+
+
+async def _discover_loop() -> None:  # pragma: no cover - P8 : découverte hebdo
+    interval = int(os.environ.get("DISCOVER_SECONDS", 7 * 86400))
+    await asyncio.sleep(120)
+    while True:
+        try:
+            def _d() -> dict:
+                from .workers.definitions import run_discover
+                with SF() as s:
+                    return run_discover(s, offline=False)
+            res = await asyncio.to_thread(_d)
+            emit("SYNC_DONE", worker="discoverSources", result=res)
+        except Exception:
+            pass
+        await asyncio.sleep(interval)
+
+
+async def _lineups_loop() -> None:  # pragma: no cover - P4 : compositions (clé free)
+    from .providers import api_football as af
+    if not af.available():
+        return  # sans clé gratuite → pas de boucle (MISSING DEPENDENCY, jamais de fake)
+    interval = int(os.environ.get("LINEUPS_SECONDS", 45 * 60))
+    await asyncio.sleep(90)
+    while True:
+        try:
+            def _l() -> dict:
+                from .workers.definitions import run_lineups
+                with SF() as s:
+                    return run_lineups(s)
+            res = await asyncio.to_thread(_l)
+            emit("SYNC_DONE", worker="syncLineups", result=res)
+        except Exception:
+            pass
+        await asyncio.sleep(interval)
+
+
+async def _odds_live_loop() -> None:  # pragma: no cover - P5 : cotes live (clé free)
+    from .providers import odds_api as oapi
+    if not oapi.available():
+        return  # sans clé gratuite → pas de boucle (MISSING DEPENDENCY, jamais de fake)
+    interval = int(os.environ.get("ODDS_LIVE_SECONDS", 3 * 3600))
+    await asyncio.sleep(60)
+    while True:
+        try:
+            def _o() -> dict:
+                from .workers.definitions import run_odds_live
+                with SF() as s:
+                    return run_odds_live(s)
+            res = await asyncio.to_thread(_o)
+            emit("SYNC_DONE", worker="syncOddsLive", result=res)
+        except Exception:
+            pass
         await asyncio.sleep(interval)
 
 
 @app.on_event("startup")
 async def startup() -> None:  # pragma: no cover
+    # registre des sources : toujours initialisé (idempotent)
+    def _ensure() -> None:
+        from .discovery.engine import ensure_sources
+        with SF() as s:
+            ensure_sources(s)
+    await asyncio.to_thread(_ensure)
     if os.environ.get("AUTO_INGEST") == "1":
         asyncio.create_task(_auto_ingest_loop())
+        # backbone MONDIAL : tous les matchs du monde (TSDB eventsday), 1 h
+        asyncio.create_task(_world_daily_loop())
         if os.environ.get("AUTO_LIVE", "1") == "1":
             asyncio.create_task(_live_fast_loop())
         if os.environ.get("AUTO_COMPUTE", "1") == "1":
             asyncio.create_task(_auto_compute_loop())
+        if os.environ.get("AUTO_DISCOVER", "1") == "1":
+            asyncio.create_task(_discover_loop())
+        # sources à clé GRATUITE : boucles lancées seulement si la clé est fournie
+        asyncio.create_task(_lineups_loop())
+        asyncio.create_task(_odds_live_loop())

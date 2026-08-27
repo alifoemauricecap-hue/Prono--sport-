@@ -64,10 +64,25 @@ def _dates_range(back: int, ahead: int) -> list[str]:
 
 
 def cmd_ingest_espn(args) -> int:
+    """Ingestion ESPN — liste explicite OU catalogue mondial (--world, --conf, --country).
+
+    --world = TOUTES les ligues du catalogue (57, 6 confédérations) ; les échecs
+    par ligue sont journalisés et non bloquants (§64). Le reste du monde est couvert
+    par le backbone TSDB eventsday (cmd ingest-tsdb-day).
+    """
+    import time
+    from .world import slugs
     provider = get_provider("espn")
+    if args.world:
+        leagues = slugs(conf=args.conf, country=args.country)
+    elif args.leagues:
+        leagues = list(args.leagues)
+    else:
+        print("U : --leagues eng.1 … OU --world [--conf UEFA] [--country \"France\"]")
+        return 1
     dates = _dates_range(args.days_back, args.days_ahead)
     reports = []
-    for league in args.leagues:
+    for league in leagues:
         league_rep = {"league": league, "jours": len(dates), "created": 0, "updated": 0,
                       "skipped": 0, "rejected": 0, "errors": []}
         for d in dates:
@@ -88,6 +103,8 @@ def cmd_ingest_espn(args) -> int:
                 s.close()
         s = _session(); seed_data_sources(s); s.commit(); s.close()
         reports.append(league_rep)
+        if args.world:
+            time.sleep(0.2)  # politesse API publique : pas de rafale (§64)
     print(json.dumps(reports, ensure_ascii=False, indent=2))
     return 0
 
@@ -134,36 +151,73 @@ def cmd_ingest_tsdb(args) -> int:
 
 
 def cmd_ingest_tsdb_day(args) -> int:
-    """TSDB eventsday : TOUS les matchs mondiaux d'un jour en 1 seule requête (worldwide)."""
-    from datetime import date
-    from .providers import thesportsdb as tsdb_mod
+    """TSDB eventsday : TOUS les matchs mondiaux d'un jour en 1 seule requête (worldwide).
+
+    C'est le backbone de la couverture MONDIALE : une ligue hors catalogue ESPN
+    (Afrique, Moyen-Orient, 2ᵉ divisions lointaines…) apparaît ici dès qu'elle joue.
+    --days N : N derniers jours en N requêtes (1/jour) — idéal au bootstrap.
+    """
+    from datetime import date, timedelta
     provider = get_provider("tsdb")
-    day = args.date or date.today().isoformat()
-    r = None
+    days: list[str] = []
+    base = date.fromisoformat(args.date) if args.date else date.today()
+    for i in range(args.days):
+        days.append((base - timedelta(days=i)).isoformat())
+    results = []
+    for day in days:
+        r = None
+        s = _session()
+        try:
+            payload = provider._get("eventsday.php", {"d": day, "s": "Soccer"})
+            events = payload.get("events") or []
+            from .ingest.service import IngestReport, ingest_one
+            report = IngestReport(provider="tsdb")
+            for e in events:
+                # Réutilise le parseur d'événements TSDB générique (mêmes champs str*)
+                raws = list(provider.parse({"events": [e]}, league_id=str(e.get("idLeague") or "eventsday"),
+                                            source_url=f"eventsday {day}"))
+                for raw in raws:
+                    ingest_one(s, raw, report)
+            s.commit()
+            r = {"day": day, "received": report.received, "created": report.created,
+                 "rejected": report.rejected, "odds_rows": report.odds_rows, "errors": report.errors}
+        except Exception as exc:
+            r = {"day": day, "error": f"{type(exc).__name__}: {exc}"}
+        finally:
+            s.close()
+        results.append(r)
+    print(json.dumps(results, ensure_ascii=False, indent=2))
+    return 0
+
+
+def cmd_world_research(args) -> int:
+    """Recherche approfondie par LIGUE (Wikipedia FR/EN, 0 €) pour TOUTES les compétitions.
+
+    Génère le dossier de recherche de chaque ligue présente en base (cache 7 j).
+    --limit plafonne le nombre de ligues traitées dans l'appel (rate-limit poli).
+    """
+    import time
+    from .db.models import Competition
+    from .research.league import league_research
     s = _session()
-    try:
-        payload = provider._get("eventsday.php", {"d": day, "s": "Soccer"})
-        events = payload.get("events") or []
-        rep = run_ingestion(s, provider, [])  # no-op health init
-        created = 0
-        from .ingest.service import IngestReport, ingest_one
-        from .providers.base import RawFixture, TeamRef
-        from datetime import datetime, timezone
-        report = IngestReport(provider="tsdb")
-        for e in events:
-            # Réutilise le parseur d'événements TSDB générique (mêmes champs str*)
-            raws = list(provider.parse({"events": [e]}, league_id=str(e.get("idLeague") or "eventsday"),
-                                        source_url=f"eventsday {day}"))
-            for raw in raws:
-                ingest_one(s, raw, report)
-        s.commit()
-        r = {"day": day, "received": report.received, "created": report.created,
-             "rejected": report.rejected, "odds_rows": report.odds_rows, "errors": report.errors}
-    except Exception as exc:
-        r = {"day": day, "error": f"{type(exc).__name__}: {exc}"}
-    finally:
-        s.close()
-    print(json.dumps(r, ensure_ascii=False, indent=2))
+    comps = s.query(Competition).all()
+    if args.limit and args.limit > 0:
+        comps = comps[:args.limit]
+    out = []
+    for c in comps:
+        try:
+            r = league_research(s, c, refresh=args.refresh)
+            out.append({"code": c.code, "name": c.name, "status": r["status"],
+                        "title": r.get("title"), "cached": r.get("cached")})
+        except Exception as exc:
+            out.append({"code": c.code, "name": c.name,
+                        "status": f"ERREUR: {type(exc).__name__}: {exc}"})
+        time.sleep(0.15)  # politesse Wikipedia API (0 €)
+    s.close()
+    ok = sum(1 for o in out if o["status"] == "SOURCE")
+    print(json.dumps({"traitées": len(out), "recherché (SOURCE)": ok,
+                      "indisponibles": len(out) - ok, "dossiers": out},
+                     ensure_ascii=False, indent=2))
     return 0
 
 
@@ -299,6 +353,107 @@ def cmd_predictions(args) -> int:
     return 0
 
 
+def cmd_ingest_apifootball(args) -> int:
+    """P4 : compositions + blessures via API-Football (clé GRATUITE, ~100 req/jour)."""
+    from datetime import date
+    from .providers import api_football as af
+    if not af.available():
+        print(json.dumps({"error": "MISSING DEPENDENCY : API_FOOTBALL_KEY absente "
+                                   "(clé gratuite à créer sur api-sports.io)"},
+                         ensure_ascii=False, indent=2))
+        return 1
+    day = args.date or date.today().isoformat()
+    p = af.ApiFootballProvider()
+    s = _session()
+    try:
+        payload = p.fetch(day)
+        raws = list(p.parse(payload, day, source_url=p.fixtures_url(day)))
+        rep = run_ingestion(s, p, raws)
+        from .ingest.enrichment import ingest_injuries, ingest_lineups
+        lineups = p.fetch_lineups(day)
+        players = ingest_lineups(s, "apifootball", lineups)
+        injuries = p.fetch_injuries(day)
+        n_inj = ingest_injuries(s, "apifootball", injuries)
+        from .ingest.consistency import run_consistency
+        run_consistency(s)
+        print(json.dumps({"day": day, **rep.as_dict(),
+                          "lineup_players": players, "injuries": n_inj},
+                         ensure_ascii=False, indent=2))
+    except Exception as exc:
+        print(json.dumps({"day": day, "error": f"{type(exc).__name__}: {exc}"},
+                         ensure_ascii=False, indent=2))
+    finally:
+        s.close()
+    return 0
+
+
+def cmd_ingest_oddsapi(_args) -> int:
+    """P5 : cotes live multi-bookmakers via The Odds API (clé GRATUITE)."""
+    from .providers import odds_api as oapi
+    if not oapi.available():
+        print(json.dumps({"error": "MISSING DEPENDENCY : ODDS_API_KEY absente "
+                                   "(clé gratuite à créer sur the-odds-api.com)"},
+                         ensure_ascii=False, indent=2))
+        return 1
+    p = oapi.OddsApiProvider()
+    s = _session()
+    try:
+        events = p.fetch()
+        from .ingest.service import attach_odds_to_fixture
+        matched = unmatched = new_snaps = 0
+        for ev in events:
+            home, away, kickoff, odds = p.parse_odds(ev)
+            if not odds:
+                continue
+            fx = p.match_fixture(s, home, away, kickoff)
+            if fx is None:
+                unmatched += 1
+                continue
+            matched += 1
+            new_snaps += attach_odds_to_fixture(s, fx, odds, "oddsapi")
+        s.commit()
+        print(json.dumps({"events": len(events), "matched": matched,
+                          "unmatched": unmatched, "new_snapshots": new_snaps},
+                         ensure_ascii=False, indent=2))
+    except Exception as exc:
+        print(json.dumps({"error": f"{type(exc).__name__}: {exc}"}, ensure_ascii=False, indent=2))
+    finally:
+        s.close()
+    return 0
+
+
+def cmd_backtest(args) -> int:
+    """§35/§36 : backtest walk-forward (Brier/LogLoss, modèle vs marché)."""
+    from .ml.backtest import run_backtest
+    s = _session()
+    rep = run_backtest(s, min_history=args.min_history)
+    print(json.dumps(rep, ensure_ascii=False, indent=2))
+    return 0
+
+
+def cmd_backup(_args) -> int:
+    """§78 SÉCURITÉ : sauvegarde SQLite COHÉRENTE (sqlite3.backup) → data/backups/."""
+    import datetime as _dt
+    import sqlite3
+    from .config import DATA_DIR
+    if not DATABASE_URL.startswith("sqlite:///"):
+        print("Backup CLI réservé à SQLite (Postgres : pg_dump).")
+        return 1
+    src_path = DATABASE_URL.replace("sqlite:///", "", 1)
+    out_dir = DATA_DIR / "backups"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    stamp = _dt.datetime.now().strftime("%Y%m%d-%H%M%S")
+    out = out_dir / f"prono-sport-{stamp}.db"
+    src = sqlite3.connect(src_path)
+    dst = sqlite3.connect(str(out))
+    with dst:
+        src.backup(dst)
+    src.close()
+    dst.close()
+    print(f"✅ Sauvegarde cohérente : {out} ({out.stat().st_size // 1024} Ko)")
+    return 0
+
+
 def cmd_status(_args) -> int:
     s = _session()
     n_fixtures = s.query(Fixture).count()
@@ -340,7 +495,14 @@ def main() -> int:
     sp.set_defaults(fn=cmd_ingest_fduk)
 
     sp = sub.add_parser("ingest-espn")
-    sp.add_argument("--leagues", nargs="+", required=True, help="ex. eng.1 esp.1 uefa.champions")
+    sp.add_argument("--leagues", nargs="+", default=None,
+                    help="ex. eng.1 esp.1 uefa.champions (OU --world)")
+    sp.add_argument("--world", action="store_true",
+                    help="catalogue mondial (57 ligues, 6 confédérations)")
+    sp.add_argument("--conf", default=None,
+                    help="filtre confédération avec --world (UEFA/CONMEBOL/CONCACAF/AFC/CAF/OFC/INTERNATIONAL)")
+    sp.add_argument("--country", default=None,
+                    help='filtre pays avec --world (ex. "France")')
     sp.add_argument("--days-back", type=int, default=0)
     sp.add_argument("--days-ahead", type=int, default=0)
     sp.set_defaults(fn=cmd_ingest_espn)
@@ -355,9 +517,18 @@ def main() -> int:
     sp.add_argument("--season", default=None, help="ex. 2025-2026 ; vide = prochains matchs")
     sp.set_defaults(fn=cmd_ingest_tsdb)
 
-    sp = sub.add_parser("ingest-tsdb-day", help="tous les matchs mondiaux d'un jour (eventsday)")
+    sp = sub.add_parser("ingest-tsdb-day",
+                        help="backbone MONDIAL : tous les matchs du monde d'un jour (eventsday)")
     sp.add_argument("--date", default=None, help="YYYY-MM-DD, défaut : aujourd'hui")
+    sp.add_argument("--days", type=int, default=1,
+                    help="N derniers jours (N requêtes) — bootstrap mondial")
     sp.set_defaults(fn=cmd_ingest_tsdb_day)
+
+    sp = sub.add_parser("world-research",
+                        help="recherche approfondie par ligue (Wikipedia, 0 €) pour toute la base")
+    sp.add_argument("--limit", type=int, default=0, help="plafond de ligues traitées (0 = toutes)")
+    sp.add_argument("--refresh", action="store_true", help="forcer la régénération")
+    sp.set_defaults(fn=cmd_world_research)
 
     sp = sub.add_parser("ingest-fdorg")
     sp.add_argument("--competitions", nargs="+", required=True, help="ex. PL ELC PD BL1 SA FL1 CL")
@@ -387,6 +558,22 @@ def main() -> int:
     sp = sub.add_parser("compute-predictions", help="M4 : Poisson/Dixon-Coles/Elo + Value Bets")
     sp.add_argument("--competition", default=None)
     sp.set_defaults(fn=cmd_predictions)
+
+    sp = sub.add_parser("ingest-apifootball",
+                        help="P4 : compositions + blessures (API-Football, clé gratuite)")
+    sp.add_argument("--date", default=None, help="YYYY-MM-DD, défaut : aujourd'hui")
+    sp.set_defaults(fn=cmd_ingest_apifootball)
+
+    sp = sub.add_parser("ingest-oddsapi",
+                        help="P5 : cotes live multi-bookmakers (The Odds API, clé gratuite)")
+    sp.set_defaults(fn=cmd_ingest_oddsapi)
+
+    sp = sub.add_parser("backtest", help="§35/§36 : backtest walk-forward + calibration")
+    sp.add_argument("--min-history", type=int, default=30)
+    sp.set_defaults(fn=cmd_backtest)
+
+    sp = sub.add_parser("backup", help="§78 : sauvegarde SQLite cohérente → data/backups/")
+    sp.set_defaults(fn=cmd_backup)
 
     sp = sub.add_parser("status"); sp.set_defaults(fn=cmd_status)
 

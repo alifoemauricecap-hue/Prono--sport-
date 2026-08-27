@@ -40,7 +40,8 @@ Dans ton Space : onglet **Files** → bouton **Add file** → **Create a new fil
 
 ### Fichier unique — nom exact : `Dockerfile`
 Copie le contenu de `deploy/hf-space/Dockerfile` (dans ce projet) et colle-le.
-> ⚠️ **LA SEULE LIGNE À MODIFIER** : dans `ARG REPO_URL=https://github.com/TON-COMPTE/prono-sport.git`, remplace `TON-COMPTE` par **ton nom d'utilisateur GitHub** (celui du Guide 04). C'est tout.
+> ✅ **RIEN À MODIFIER** : `ARG REPO_URL` pointe déjà vers `https://github.com/alifoemauricecap-hue/Prono--sport-.git`.
+> (À changer seulement si tu renames ton dépôt — et déploie après fusion de la branche 3.0 dans `main`.)
 > Les scripts de démarrage (`start_server.sh`, `bootstrap_data.sh`) sont déjà dans ton repo GitHub — le Dockerfile les récupère tout seul.
 
 ### Vérifier le README

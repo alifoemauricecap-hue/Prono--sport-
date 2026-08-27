@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ============================================================
-# PRONO SPORT 2.0 — Installation 1-commande, 100 % GRATUITE
+# PRONO SPORT 3.0 — Installation 1-commande, 100 % GRATUITE
 # Aucune clé API payante, aucun abonnement : uniquement des
 # sources publiques gratuites (ESPN public, football-data.co.uk,
 # OpenLigaDB, TheSportsDB key "3", Open-Meteo).
@@ -35,7 +35,7 @@ python -m app.cli compute-predictions
 
 cat << 'DONE'
 
-✅ PRONO SPORT 2.0 installé.
+✅ PRONO SPORT 3.0 installé.
 
 Lancer l'application :
   cd backend && source .venv/bin/activate

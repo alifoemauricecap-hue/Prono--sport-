@@ -1,10 +1,17 @@
 #!/bin/sh
-# PRONO SPORT 2.0 — démarrage universel 24/7 (Koyeb / HF Spaces / VPS / Termux).
+# PRONO SPORT 3.0 — démarrage universel 24/7 (Koyeb / HF Spaces / VPS / Termux).
 # §1 honnêteté : base vide -> on NE SIMULE RIEN. L'API répond tout de suite
 # ("DONNÉE NON DISPONIBLE") pendant que le bootstrap remplit les VRAIES données en fond.
 set -e
 cd "$(dirname "$0")"
 mkdir -p ../data
+# S'assurer que le répertoire du fichier de base existe (ex. /data monté sur Render).
+python - <<'PY'
+from pathlib import Path
+from app.config import DATABASE_URL
+if DATABASE_URL.startswith("sqlite:///"):
+    Path(DATABASE_URL.replace("sqlite:///", "", 1)).parent.mkdir(parents=True, exist_ok=True)
+PY
 python -m app.cli init-db
 
 NEED=$(python - <<'PY'
@@ -22,5 +29,5 @@ if [ "$NEED" = "yes" ]; then
 fi
 
 PORT="${PORT:-8000}"
-echo "PRONO SPORT 2.0 en ligne sur le port $PORT"
+echo "PRONO SPORT 3.0 en ligne sur le port $PORT"
 exec uvicorn app.api:app --host 0.0.0.0 --port "$PORT"

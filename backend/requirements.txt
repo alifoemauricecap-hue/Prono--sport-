@@ -1,4 +1,4 @@
-# PRONO SPORT 2.0 — dépendances backend (toutes gratuites, licences libres)
+# PRONO SPORT 3.0 — dépendances backend (toutes gratuites, licences libres)
 sqlalchemy>=2.0,<3.0
 httpx>=0.27
 numpy>=1.26
@@ -8,6 +8,7 @@ uvicorn[standard]>=0.29
 
 # Tests / CI
 pytest>=8.0
+pyyaml>=6.0        # parse de render.yaml (blueprint Render) dans les tests
 
 # Optionnel :
 #   pillow             → logos 64px intégrés dans l'instantané HTML (make_snapshot.py)
