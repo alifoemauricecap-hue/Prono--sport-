@@ -14,9 +14,12 @@ from datetime import datetime, timezone
 
 import httpx
 
+from ..config import HTTP_USER_AGENT
+
 GEO_URL = "https://geocoding-api.open-meteo.com/v1/search"
 FCST_URL = "https://api.open-meteo.com/v1/forecast"
 TTL_SECONDS = 6 * 3600
+HEADERS = {"User-Agent": HTTP_USER_AGENT}
 
 _geo_cache: dict[str, tuple[float, tuple[float, float] | None]] = {}
 _fcst_cache: dict[str, tuple[float, dict | None]] = {}
@@ -29,7 +32,7 @@ def geocode_city(city: str) -> tuple[float, float] | None:
         return hit[1]
     try:
         r = httpx.get(GEO_URL, params={"name": city, "count": 1, "language": "fr", "format": "json"},
-                      timeout=8.0)
+                      timeout=8.0, headers=HEADERS)
         results = (r.json() or {}).get("results") or []
         coords = (results[0]["latitude"], results[0]["longitude"]) if results else None
     except Exception:
@@ -58,7 +61,7 @@ def forecast_at(city: str, when_utc: datetime) -> dict | None:
             "hourly": "temperature_2m,precipitation_probability,precipitation,wind_speed_10m",
             "timezone": "UTC",
             "start_date": when_utc.date().isoformat(), "end_date": when_utc.date().isoformat(),
-        }, timeout=8.0)
+        }, timeout=8.0, headers=HEADERS)
         hourly = (r.json() or {}).get("hourly") or {}
         times = hourly.get("time") or []
         target = when_utc.strftime("%Y-%m-%dT%H:00")

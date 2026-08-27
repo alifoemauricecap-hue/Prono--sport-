@@ -1,11 +1,12 @@
 #!/bin/sh
-# PRONO SPORT 3.0 — démarrage universel 24/7 (Koyeb / HF Spaces / VPS / Termux).
-# §1 honnêteté : base vide -> on NE SIMULE RIEN. L'API répond tout de suite
-# ("DONNÉE NON DISPONIBLE") pendant que le bootstrap remplit les VRAIES données en fond.
+# PRONO SPORT 3.0 — démarrage universel 24/7 (Render / Koyeb / HF / VPS / Termux).
+# §1 honnêteté : base vide → on NE SIMULE RIEN. L'API répond tout de suite
+# (« DONNÉE INDISPONIBLE ») pendant que le bootstrap remplit les VRAIES données.
+# REPRISE : si le bootstrap n'est pas terminé (marqueur .bootstrap_done absent —
+# ex. après une veille du plan Free qui tue le processus de fond), il est relancé
+# au démarrage suivant ; les étapes déjà faites sont sautées (marqueurs).
 set -e
 cd "$(dirname "$0")"
-mkdir -p ../data
-# S'assurer que le répertoire du fichier de base existe (ex. /data monté sur Render).
 python - <<'PY'
 from pathlib import Path
 from app.config import DATABASE_URL
@@ -14,17 +15,16 @@ if DATABASE_URL.startswith("sqlite:///"):
 PY
 python -m app.cli init-db
 
-NEED=$(python - <<'PY'
-from sqlalchemy import create_engine, text
+DBDIR=$(python - <<'PY'
+from pathlib import Path
 from app.config import DATABASE_URL
-eng = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
-n = eng.connect().execute(text("SELECT COUNT(*) FROM fixtures")).scalar()
-print("yes" if n == 0 else "no")
+print(Path(DATABASE_URL.replace("sqlite:///", "", 1)).parent
+      if DATABASE_URL.startswith("sqlite:///") else ".")
 PY
 )
 
-if [ "$NEED" = "yes" ]; then
-  echo "[bootstrap] base vide -> 1re compilation des donnees reelles (~20-40 min) en arriere-plan..."
+if [ ! -f "$DBDIR/.bootstrap_done" ]; then
+  echo "[bootstrap] 1er démarrage ou incomplet → bootstrap mondial (reprise idempotente) en arrière-plan…"
   ./bootstrap_data.sh > /tmp/bootstrap.log 2>&1 &
 fi
 

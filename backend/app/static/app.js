@@ -573,7 +573,7 @@ function renderMcHeader() {
       ${c?.clock && live ? `<span>⏱ ${esc(c.clock)}</span>` : ""}
       ${c?.venue ? `<span>🏟 ${esc(c.venue)}${c.venue_city ? ` (${esc(c.venue_city)})` : ""}</span>` : ""}
       ${a?.fixture?.referee ? `<span> Arbitre : ${esc(a.fixture.referee)} ${badge("SOURCE")}</span>` : ""}
-      ${a?.weather ? `<span>🌦 ${Math.round(a.weather.temperature ?? "—")}°C${a.weather.precipitation ? ` · pluie ${a.weather.precipitation} mm` : ""} ${badge("SOURCE", "Open-Meteo")}</span>` : ""}
+      ${a?.weather && Number.isFinite(a.weather.temperature_c) ? `<span>🌦 ${Math.round(a.weather.temperature_c)}°C${a.weather.precipitation_mm ? ` · pluie ${Math.round(a.weather.precipitation_mm * 10) / 10} mm` : ""} ${badge("SOURCE", "Open-Meteo")}</span>` : ""}
     </div>`;
 }
 function mcShowTab(tab) {

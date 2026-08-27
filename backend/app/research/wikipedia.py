@@ -15,10 +15,13 @@ import time
 
 import httpx
 
+from ..config import HTTP_USER_AGENT
+
 BASE_FR = "https://fr.wikipedia.org"
 BASE_EN = "https://en.wikipedia.org"
 TTL_SECONDS = 24 * 3600
 TIMEOUT = 10.0
+HEADERS = {"User-Agent": HTTP_USER_AGENT}
 
 _cache: dict[str, tuple[float, object]] = {}
 
@@ -55,6 +58,7 @@ def wikipedia_summary(title: str, lang: str = "fr") -> dict | None:
         r = httpx.get(
             f"{base}/api/rest_v1/page/summary/{title.replace(' ', '_')}",
             timeout=TIMEOUT,
+            headers=HEADERS,
         )
         if r.status_code != 200:
             _store(key, None)
@@ -93,6 +97,7 @@ def search_wikipedia(query: str, lang: str = "fr", limit: int = 5) -> list[dict]
                 "format": "json", "origin": "*", "redirects": "1",
             },
             timeout=TIMEOUT,
+            headers=HEADERS,
         )
         r.raise_for_status()
         data = r.json()

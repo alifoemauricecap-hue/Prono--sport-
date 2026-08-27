@@ -218,6 +218,27 @@ def test_tsdb_parse_ligue_hors_catalogue_nom_reel():
     assert r.home_score is None  # « NS » → jamais de faux 0 (§1)
 
 
+def test_wikipedia_envoie_user_agent_descriptif(monkeypatch):
+    """Wikimedia bloque les UA de bibliothèques par défaut (python-httpx) → 403."""
+    from app.research import wikipedia as W
+    captured = {}
+    class _FakeResp:
+        status_code = 200
+        def json(self):
+            return {"type": "standard", "title": "T", "extract": "x",
+                    "content_urls": {"desktop": {"page": "u"}}, "thumbnail": None}
+    def fake_get(url, **kw):
+        captured["headers"] = kw.get("headers") or {}
+        return _FakeResp()
+    monkeypatch.setattr(W.httpx, "get", fake_get)
+    W._cache.clear()
+    s = W.wikipedia_summary("Test League", "fr")
+    assert s is not None
+    ua = captured["headers"].get("User-Agent", "")
+    assert ua and "httpx" not in ua
+    assert "PRONO-SPORT" in ua
+
+
 # ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
