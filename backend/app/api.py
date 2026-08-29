@@ -23,6 +23,7 @@ from pathlib import Path
 from fastapi import FastAPI, Header, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
+from sqlalchemy import or_
 from sqlalchemy.orm import Session, joinedload
 
 from .config import DATABASE_URL
@@ -31,12 +32,16 @@ from .db.models import (
     Bookmaker,
     Competition,
     Fixture,
+    Injury,
     Market,
     Notification,
     OddsSnapshot,
+    Player,
+    PlayerAlias,
     Prediction,
     PredictionResult,
     ProviderHealth,
+    Suspension,
     Team,
     TeamAnalytics,
     ValueBet,
@@ -613,6 +618,57 @@ def get_team(team_id: int) -> JSONResponse:
                 "features_version": a.features_version,
                 "computed_at": _iso(a.computed_at),
             },
+        })
+
+
+@app.get("/v1/players")
+def get_players(team_id: int | None = None, q: str | None = None,
+                limit: int = Query(200, le=500)) -> JSONResponse:
+    """§21 JOUEURS : liste uniquement les joueurs réellement fournis par une source
+    (compositions/effectifs API-Football, etc.) avec leur disponibilité réelle (§22).
+    Aucun joueur inventé : table vide -> 'missing_dependency' expliqué côté UI."""
+    with SF() as s:
+        query = s.query(Player)
+        if team_id:
+            query = query.filter(Player.team_id == team_id)
+        if q:
+            like = f"%{q.strip()}%"
+            query = (query.outerjoin(PlayerAlias, PlayerAlias.player_id == Player.id)
+                          .filter(or_(Player.name.ilike(like), PlayerAlias.alias.ilike(like))))
+        players = query.order_by(Player.name).limit(limit).all()
+
+        injuries = {i.player_id: i for i in s.query(Injury).all()}
+        suspensions = {su.player_id: su for su in s.query(Suspension).all()}
+        teams = {t.id: t.name for t in s.query(Team).all()}
+
+        out = []
+        for p in players:
+            status, detail = "AVAILABLE", None
+            if p.id in suspensions:
+                status, detail = "SUSPENDED", suspensions[p.id].reason
+            elif p.id in injuries:
+                inj = injuries[p.id]
+                status, detail = (inj.status or "INJURED"), inj.detail
+            out.append({
+                "id": p.id, "name": p.name,
+                "team_id": p.team_id, "team": teams.get(p.team_id),
+                "position": p.position, "country": p.country,
+                "logo_url": p.logo_url,
+                "availability": status,            # §22
+                "availability_detail": detail,
+                "label": "SOURCE DATA",
+            })
+
+        missing = len(out) == 0
+        return JSONResponse({
+            "count": len(out),
+            "players": out,
+            "missing_dependency": missing,
+            "note": ("Aucun joueur en base : les effectifs/compositions proviennent de "
+                     "l'API-Football (clé gratuite ~100 req/jour). Sans clé, PRONO SPORT "
+                     "n'affiche aucun joueur inventé (§21/§22).") if missing else
+                    "Joueurs issus de sources réelles (compositions/effectifs).",
+            "generated_at": datetime.now(timezone.utc).isoformat(),
         })
 
 

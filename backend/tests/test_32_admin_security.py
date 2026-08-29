@@ -271,3 +271,42 @@ def test_frontend_admin_appelle_endpoints_admin():
     assert "/v1/admin/errors" in js
     assert "/v1/admin/backup" in js
     assert "/v1/admin/sync/" in js
+
+
+# ---------------------------------------------------------------------------
+# §21/§22 JOUEURS : endpoint + page, et absence honnête (jamais inventé)
+# ---------------------------------------------------------------------------
+def test_players_endpoint_empty_is_honest():
+    """Sans effectif en base, /v1/players signale MISSING DEPENDENCY, jamais de joueurs inventés."""
+    from fastapi.testclient import TestClient
+    from app.api import app
+    r = TestClient(app).get("/v1/players")
+    assert r.status_code == 200
+    d = r.json()
+    assert "players" in d and "count" in d
+    assert isinstance(d["missing_dependency"], bool)
+    if d["count"] == 0:
+        assert d["missing_dependency"] is True
+        assert "API-Football" in d["note"]
+
+
+def test_players_endpoint_shape_uses_real_statuses():
+    """Tout joueur exposé porte un statut de disponibilité §22 valide et un label SOURCE DATA."""
+    from fastapi.testclient import TestClient
+    from app.api import app
+    d = TestClient(app).get("/v1/players?limit=500").json()
+    valid = {"AVAILABLE", "SUSPENDED", "INJURED", "DOUBTFUL", "RETURNING", "UNKNOWN"}
+    for p in d["players"]:
+        assert p["availability"] in valid
+        assert p["label"] == "SOURCE DATA"
+        assert p["name"]  # jamais de joueur sans nom réel
+
+
+def test_frontend_page_joueurs_presente():
+    html = (STATIC / "index.html").read_text()
+    js = (STATIC / "app.js").read_text()
+    assert '#/joueurs' in html, "navigation Joueurs manquante (§49)"
+    assert "renderJoueurs" in js
+    assert "joueurs: renderJoueurs" in js
+    # état honnête MISSING DEPENDENCY affiché quand aucune clé/effectif
+    assert "MISSING DEPENDENCY" in js

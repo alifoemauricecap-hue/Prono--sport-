@@ -295,3 +295,9 @@ a.fx-link { color: var(--text); font-weight: 600; }
   padding: 12px; font-size: 13.5px; line-height: 1.55; margin: 10px 0;
   max-height: 320px; overflow-y: auto; white-space: pre-wrap;
 }
+
+/* §21 Joueurs */
+.ev-warn { color: var(--warn, #e0a030); font-weight: 700; }
+.mini-logo { width: 22px; height: 22px; border-radius: 50%; object-fit: cover; vertical-align: -5px; margin-right: 4px; }
+.player-row { padding: 10px 12px; display: flex; flex-direction: column; gap: 3px; }
+.player-row .row { align-items: center; }

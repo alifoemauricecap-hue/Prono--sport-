@@ -769,6 +769,60 @@ async function refreshNotifCount() {
 }
 
 /* ---------------- Vue : FAVORIS (local, 0 €) ---------------- */
+/* ---------------- Vue : JOUEURS (§21/§22 — disponibilités réelles) ---------------- */
+async function renderJoueurs() {
+  view.innerHTML = `<div class="loading"><div class="spinner"></div><p>Joueurs (données réelles)…</p></div>`;
+  try {
+    const d = await api("/v1/players?limit=300");
+    if (d.missing_dependency) {
+      view.innerHTML = `
+        <h3 class="section-title">👤 Joueurs</h3>
+        <div class="empty">
+          <b>📭 MISSING DEPENDENCY — effectifs non disponibles</b>
+          <p>Les compositions et effectifs proviennent de l'<b>API-Football</b> (clé gratuite ~100 requêtes/jour).
+          Aucune clé n'est configurée sur ce serveur : PRONO SPORT n'affiche <b>aucun joueur inventé</b> (§21/§22).</p>
+          <p class="faint">Solution (0 €) : créer une clé gratuite sur api-football.com puis définir
+          <code>API_FOOTBALL_KEY</code> dans les variables d'environnement (Render → Environment).</p>
+          <p class="faint">${esc(d.note || "")}</p>
+        </div>`;
+      return;
+    }
+    const availColor = {
+      AVAILABLE: "ev-pos", SUSPENDED: "ev-neg", INJURED: "ev-neg",
+      DOUBTFUL: "ev-warn", RETURNING: "ev-warn", UNKNOWN: "muted",
+    };
+    const availTxt = {
+      AVAILABLE: "✅ Disponible", SUSPENDED: "🟥 Suspendu", INJURED: "🟥 Blessé",
+      DOUBTFUL: "🟧 Incertain", RETURNING: "🟧 Retour", UNKNOWN: "❓ Inconnu",
+    };
+    view.innerHTML = `
+      <h3 class="section-title">👤 Joueurs — ${d.count} au total</h3>
+      <div class="searchbox mb" style="max-width:420px">
+        <input id="players-search" type="search" placeholder="Filtrer : nom, poste, équipe…" autocomplete="off">
+      </div>
+      <div class="grid grid-2" id="players-grid">
+        ${d.players.map(p => `
+          <div class="panel player-row" data-filter="${esc((p.name + " " + (p.team || "") + " " + (p.position || "")).toLowerCase())}">
+            <div class="row spread">
+              <b>${p.logo_url ? `<img src="${esc(p.logo_url)}" alt="" class="mini-logo" onerror="this.remove()">` : "👤"} ${esc(p.name)}</b>
+              <span class="${availColor[p.availability] || "muted"}">${availTxt[p.availability] || esc(p.availability)}</span>
+            </div>
+            <div class="faint">${esc(p.team || "Équipe inconnue")} · ${esc(p.position || "poste —")} ${p.country ? "· " + esc(p.country) : ""}</div>
+            ${p.availability_detail ? `<div class="faint">📋 ${esc(p.availability_detail)}</div>` : ""}
+          </div>`).join("")}
+      </div>
+      <p class="faint mt">${badge("SOURCE", "Données source")} Joueurs et statuts issus des compositions/effectifs réels — jamais d'absence inventée (§22).</p>`;
+    const input = $("#players-search");
+    input && input.addEventListener("input", () => {
+      const q = input.value.trim().toLowerCase();
+      document.querySelectorAll(".player-row").forEach(el =>
+        el.style.display = el.dataset.filter.includes(q) ? "" : "none");
+    });
+  } catch (e) {
+    view.innerHTML = `<div class="empty"><b>Erreur</b>${esc(e.message)}</div>`;
+  }
+}
+
 async function renderFavoris() {
   view.innerHTML = `<div class="loading"><div class="spinner"></div></div>`;
   if (!FAV.size) {
@@ -1004,7 +1058,8 @@ async function renderAdmin() {
 const ROUTES = {
   accueil: renderAccueil, live: renderLive, avenir: renderAvenir,
   termes: renderTermine, termines: renderTermine, competitions: renderCompetitions,
-  monde: renderMonde, equipes: renderEquipes, pronostics: renderPronostics,
+  monde: renderMonde, equipes: renderEquipes, joueurs: renderJoueurs,
+  pronostics: renderPronostics,
   value: renderValue, analyses: renderAnalyses, assistant: renderAssistant,
   favoris: renderFavoris, admin: renderAdmin,
 };

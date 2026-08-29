@@ -1,11 +1,19 @@
 # PRONO SPORT 3.0 — Blueprint RENDER (déploiement 1 clic)
 # Docs : https://render.com/docs/blueprint-spec
 #
-# Coûts (vérifiés sur render.com/pricing le 26/08/2026) :
-#   - instance Free : 0 $/mois (512 Mo RAM / 0.1 CPU) — mise en veille après 15 min d'inactivité
-#   - instance Starter : 7 $/mois (toujours en ligne) — optionnel
-#   - disque persistant : 0,25 $/Go/mois — optionnel (sans disque, la base se
-#     reconstruit toute seule au redémarrage grâce au bootstrap auto)
+# Coûts (vérifiés sur render.com/pricing le 29/08/2026) :
+#   - instance Free : 0 $/mois (512 Mo RAM / 0.1 CPU) — mise en veille après 15 min
+#     d'inactivité. Les workers redémarrent au réveil ; un cron externe gratuit
+#     (ex. cron-job.org) peut taper /v1/health toutes les 10 min pour maintenir éveillé.
+#   - instance Starter : 7 $/mois (toujours en ligne, workers 24/7) — optionnel.
+#   - disque persistant : 0,25 $/Go/mois — OPTIONNEL (voir ci-dessous).
+#
+# IMPORTANT (0 €, sans disque) : la base SQLite est placée dans le répertoire de
+# l'application (/srv/repo/data), accessible en écriture par l'utilisateur conteneur.
+# Le fichier n'est PAS conservé entre deux redéploiements : au démarrage, le bootstrap
+# recompile automatiquement les VRAIES données depuis les sources gratuites (jamais de
+# données inventées). Pour conserver la base entre les déploiements, montez un disque
+# persistant sur /data et décommentez la variable + le bloc disk ci-dessous.
 services:
   - type: web
     name: prono-sport
@@ -17,8 +25,13 @@ services:
     envVars:
       - key: PYTHONIOENCODING
         value: utf-8
+      - key: PYTHONUNBUFFERED
+        value: "1"
+      # Base par défaut : répertoire applicatif (accessible en écriture, 0 €).
+      # Avec disque persistant (bloc disk ci-dessous), remplacer par :
+      #   sqlite:////data/prono_sport.db
       - key: DATABASE_URL
-        value: sqlite:////data/prono_sport.db
+        value: sqlite:////srv/repo/data/prono_sport.db
       - key: AUTO_INGEST
         value: "1"
       - key: AUTO_INGEST_SECONDS
@@ -31,13 +44,26 @@ services:
         value: "1"
       - key: AUTO_COMPUTE_SECONDS
         value: "3600"
+      - key: AUTO_DISCOVER
+        value: "1"
+      - key: DISCOVER_SECONDS
+        value: "604800"
       # Secret : à renseigner dans le dashboard Render (Settings → Environment).
       # Protège POST /v1/admin/sync/* et GET /v1/admin/backup (en-tête x-admin-token).
       - key: ADMIN_TOKEN
         sync: false
-    # Disque persistant (OPTIONNEL, payant 0,25 $/Go/mois) :
-    # sans disque, le bootstrap auto recompile les vraies données au 1er démarrage
-    # (~40-90 min, couverture mondiale) — comportement honnête et prévu, jamais de données inventées.
+      # Clés de sources gratuites OPTIONNELLES (toutes gratuites, jamais de payant) :
+      - key: FOOTBALL_DATA_ORG_TOKEN
+        sync: false
+      - key: API_FOOTBALL_KEY
+        sync: false
+      - key: ODDS_API_KEY
+        sync: false
+      - key: TSDB_KEY
+        value: "3"
+    # Disque persistant OPTIONNEL (~2,5 $/mois pour 10 Go) : conserve la base entre
+    # deux redéploiements. Si vous l'activez, passez DATABASE_URL à
+    # sqlite:////data/prono_sport.db.
     # disk:
     #   name: prono-data
     #   mountPath: /data
