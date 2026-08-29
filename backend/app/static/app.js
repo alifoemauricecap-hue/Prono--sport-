@@ -142,6 +142,25 @@ function toast(msg, kind = "") {
 
 /* ---------------- Cartes de match ---------------- */
 const SEL_TXT = { H: "Victoire dom.", D: "Match nul", A: "Victoire ext.", Over: "Plus de 2,5 buts", Under: "Moins de 2,5 buts" };
+
+/* ----------------- VERDICT PRONOSTIC (clair, chiffré, jamais une certitude) -----------------
+   Le modèle produit une distribution 1X2 ; le verdict met en avant l'issue la plus
+   probable AVEC son pourcentage (ex. « Domicile — 62 % »). Reste une probabilité,
+   pas une certitude : le score réel peut différer (cf. disclaimer global). */
+const VERDICT_TXT = { H: "Domicile", D: "Match nul", A: "Extérieur" };
+function modelVerdict(probs) {
+  if (!probs) return null;
+  const keys = ["H", "D", "A"];
+  let best = keys[0];
+  for (const k of keys) if ((probs[k] || 0) > (probs[best] || 0)) best = k;
+  if (!(probs[best] > 0)) return null;
+  return { sel: best, p: probs[best] };
+}
+function verdictHtml(probs) {
+  const v = modelVerdict(probs);
+  if (!v) return "";
+  return `<div class="fx-verdict">🎯 Pronostic du modèle : <b>${VERDICT_TXT[v.sel]} — ${pct(v.p)}</b></div>`;
+}
 function scoreBlock(card) {
   const s = card.score || {};
   if (card.status === "FINISHED")
@@ -176,6 +195,7 @@ function matchCard(card) {
       ${scoreBlock(card)}
       ${pickHtml}
     </div>
+    ${card.prediction ? verdictHtml(card.prediction.ensemble || card.prediction.dc_1x2) : ""}
     ${card.odds_trend ? `<div class="mini mt">Tendance 1X2 : H ${card.odds_trend.H >= 0 ? "↗" : "↘"}${Math.abs(card.odds_trend.H)} · D ${card.odds_trend.D >= 0 ? "↗" : "↘"}${Math.abs(card.odds_trend.D)} · A ${card.odds_trend.A >= 0 ? "↗" : "↘"}${Math.abs(card.odds_trend.A)}</div>` : ""}
   </div>`;
 }
@@ -515,6 +535,7 @@ async function renderPronostics() {
       return `<div class="panel" style="cursor:pointer" data-fx="${f.id}">
         <div class="row spread"><b>${esc(f.home?.name)} – ${esc(f.away?.name)}</b>${star(f.id)}</div>
         <div class="faint mb">${esc(f.competition?.name || "")} · ${fmtTime(f.kickoff_utc)}</div>
+        ${verdictHtml(p.ensemble || probs)}
         ${probRow("Domicile", probs.H)}
         ${probRow("Nul", probs.D)}
         ${probRow("Extérieur", probs.A)}
@@ -701,19 +722,26 @@ function mcPronos() {
   const p = a?.prediction;
   if (!p) return `<div class="empty"><b>INSUFFICIENT DATA</b>Aucun modèle entraîné sur ce périmètre — jamais une prédiction inventée.</div>`;
   const probs = p.probabilities?.["1X2"] || {};
+  const ens = p.probabilities?.["1X2_ensemble"] || probs;
   const ou = p.probabilities?.["OU_2.5"] || {};
   const btts = p.probabilities?.BTTS || {};
   const eg = p.expected_goals || {};
   const inplay = c?.inplay;
+  const isElo = p.input_snapshot?.fallback === "elo";
   const probBar = (label, v) => `<div class="prob-row"><span class="muted">${label}</span>
     <div class="prob-bar"><div class="prob-fill" style="width:${Math.round((v || 0) * 100)}%"></div></div>
     <span class="prob-val">${pct(v)}</span></div>`;
   return `
+    ${isElo ? `<div class="panel mb" style="border-color:var(--value)">
+      <div class="row spread"><b>⚠️ Repli Elo</b>${badge("MODELE", "historique mince")}</div>
+      <p class="muted">Historique trop mince pour un modèle Poisson/Dixon-Coles : verdict calculé sur les seuls ratings Elo globaux (matchs réels).</p>
+    </div>` : ""}
     ${inplay ? `<div class="panel mb" style="border-color:var(--live)">
       <div class="row spread"><b>🔴 Probabilités en direct</b>${badge("CALCULE", "après événement réel")}</div>
       ${probBar("Domicile", inplay.H)}${probBar("Nul", inplay.D)}${probBar("Extérieur", inplay.A)}
       <p class="faint">Recalculées après chaque événement réel (score + minute) — AVANT → APRÈS.</p>
     </div>` : ""}
+    ${verdictHtml(ens) ? `<div class="mc-block"><div class="bh"><b>🎯 Pronostic du modèle</b>${badge("MODELE", p.model_version)}</div>${verdictHtml(ens)}<p class="faint">Issue la plus probable selon le modèle — probabilité, jamais une certitude.</p></div>` : ""}
     <div class="mc-block">
       <div class="bh"><b>Probabilités 1X2 (modèle)</b>${badge("MODELE", p.model_version)}</div>
       ${probBar(`${esc(c?.home?.name || "Dom.")}`, probs.H)}
