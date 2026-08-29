@@ -295,3 +295,36 @@ a.fx-link { color: var(--text); font-weight: 600; }
   padding: 12px; font-size: 13.5px; line-height: 1.55; margin: 10px 0;
   max-height: 320px; overflow-y: auto; white-space: pre-wrap;
 }
+
+/* §21 Joueurs */
+.ev-warn { color: var(--warn, #e0a030); font-weight: 700; }
+.mini-logo { width: 22px; height: 22px; border-radius: 50%; object-fit: cover; vertical-align: -5px; margin-right: 4px; }
+.player-row { padding: 10px 12px; display: flex; flex-direction: column; gap: 3px; }
+.player-row .row { align-items: center; }
+
+/* ===================== Écussons déterministes (repli visuel, CALCULÉ) ===================== */
+.crest {
+  display: inline-flex; align-items: center; justify-content: center;
+  border-radius: 9px; font-weight: 800; flex: 0 0 auto;
+  letter-spacing: .5px; box-shadow: 0 1px 3px rgba(0,0,0,.25);
+  background: var(--panel-2, #2a3350); color: #fff;
+  width: 30px; height: 30px; font-size: 11px; overflow: hidden;
+}
+.crest-wrap { position: relative; display: inline-flex; flex: 0 0 auto;
+  border-radius: 9px; background: var(--panel-2, #2a3350); box-shadow: 0 1px 3px rgba(0,0,0,.25); }
+.crest-wrap .crest { border-radius: 9px; box-shadow: none; }
+.crest-img {
+  position: absolute; inset: 0; width: 100%; height: 100%;
+  border-radius: 9px; object-fit: contain; background: #0a1120; padding: 2px;
+}
+/* tailles */
+.crest.logo-xs, .crest-wrap.logo-xs { width: 26px; height: 26px; font-size: 10px; }
+.crest.logo-sm, .crest-wrap.logo-sm { width: 30px; height: 30px; font-size: 11px; }
+.crest.logo-lg, .crest-wrap.logo-lg { width: 52px; height: 52px; font-size: 18px; }
+.comp-logo { width: 26px; height: 26px; border-radius: 9px; object-fit: contain; }
+
+/* alignement dans les cartes de match */
+.fx-team > .crest, .fx-team > .crest-wrap { margin-right: 8px; flex: 0 0 auto; }
+.fx-team { display: flex; align-items: center; }
+.mc-team > .crest, .mc-team > .crest-wrap { margin: 0; }
+.mini-logo { display: inline-flex; }

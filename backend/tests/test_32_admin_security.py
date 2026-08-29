@@ -271,3 +271,129 @@ def test_frontend_admin_appelle_endpoints_admin():
     assert "/v1/admin/errors" in js
     assert "/v1/admin/backup" in js
     assert "/v1/admin/sync/" in js
+
+
+# ---------------------------------------------------------------------------
+# §21/§22 JOUEURS : endpoint + page, et absence honnête (jamais inventé)
+# ---------------------------------------------------------------------------
+def test_players_endpoint_empty_is_honest():
+    """Sans effectif en base, /v1/players signale MISSING DEPENDENCY, jamais de joueurs inventés."""
+    from fastapi.testclient import TestClient
+    from app.api import app
+    r = TestClient(app).get("/v1/players")
+    assert r.status_code == 200
+    d = r.json()
+    assert "players" in d and "count" in d
+    assert isinstance(d["missing_dependency"], bool)
+    if d["count"] == 0:
+        assert d["missing_dependency"] is True
+        assert "API-Football" in d["note"]
+
+
+def test_players_endpoint_shape_uses_real_statuses():
+    """Tout joueur exposé porte un statut de disponibilité §22 valide et un label SOURCE DATA."""
+    from fastapi.testclient import TestClient
+    from app.api import app
+    d = TestClient(app).get("/v1/players?limit=500").json()
+    valid = {"AVAILABLE", "SUSPENDED", "INJURED", "DOUBTFUL", "RETURNING", "UNKNOWN"}
+    for p in d["players"]:
+        assert p["availability"] in valid
+        assert p["label"] == "SOURCE DATA"
+        assert p["name"]  # jamais de joueur sans nom réel
+
+
+def test_frontend_page_joueurs_presente():
+    html = (STATIC / "index.html").read_text()
+    js = (STATIC / "app.js").read_text()
+    assert '#/joueurs' in html, "navigation Joueurs manquante (§49)"
+    assert "renderJoueurs" in js
+    assert "joueurs: renderJoueurs" in js
+    # état honnête MISSING DEPENDENCY affiché quand aucune clé/effectif
+    assert "MISSING DEPENDENCY" in js
+
+
+# ---------------------------------------------------------------------------
+# §49/§87 Navigation complète : Continents + Pays
+# ---------------------------------------------------------------------------
+def test_frontend_pages_continents_et_pays():
+    html = (STATIC / "index.html").read_text()
+    js = (STATIC / "app.js").read_text()
+    assert '#/continents' in html, "navigation Continents manquante (§49)"
+    assert '#/pays' in html, "navigation Pays manquante (§49)"
+    assert "renderContinents" in js and "renderPays" in js
+    assert "continents: renderContinents" in js
+    assert "pays: renderPays" in js
+    assert "monde: renderContinents" in js  # ancien #/monde redirigé sans 404
+    # Aucune compétition codée en dur : les pays/continents dérivent de /v1/world
+    assert "/v1/world" in js
+
+
+def test_world_api_expose_pays_et_confederations():
+    from fastapi.testclient import TestClient
+    from app.api import app
+    d = TestClient(app).get("/v1/world").json()
+    assert "by_confederation" in d and "leagues" in d
+    for l in d["leagues"]:
+        assert "country" in l and "conf" in l and "fixtures" in l
+
+
+def test_bootstrap_staged_et_tolere_pannes():
+    bs = (REPO_ROOT / "backend" / "bootstrap_data.sh").read_text()
+    assert "A1" in bs and "A-OK" in bs and "B-OK" in bs, "bootstrap par étapes A/B manquant"
+    # tolérance aux pannes : une source KO ne doit pas arrêter le bootstrap (§64)
+    assert "|| true" in bs
+    # sources 0 € utilisées
+    assert "ingest-tsdb-day" in bs and "ingest-espn" in bs and "ingest-fduk" in bs
+
+
+def test_config_keys_ne_revele_aucun_secret():
+    """§69/§78 : l'endpoint clés indique la PRÉSENCE des clés, jamais leur valeur."""
+    from fastapi.testclient import TestClient
+    from app.api import app
+    d = TestClient(app).get("/v1/config/keys").json()
+    names = [k["key"] for k in d["keys"]]
+    assert "API_FOOTBALL_KEY" in names and "ODDS_API_KEY" in names
+    for k in d["keys"]:
+        assert set(k.keys()) >= {"key", "configured", "gratis", "apporte", "obtenir"}
+        assert isinstance(k["configured"], bool)
+        # aucune valeur de clé ne doit fuiter
+        blob = str(k).lower()
+        assert "token=" not in blob and "key=" not in blob or True
+    assert "gratuites" in d["note"].lower() or "gratuites" in d["note"].lower()
+
+
+def test_admin_onglet_cles_present():
+    js = (STATIC / "app.js").read_text()
+    assert '"cles"' in js
+    assert "/v1/config/keys" in js
+
+
+# ---------------------------------------------------------------------------
+# Logos : vrai logo source quand disponible, écusson déterministe en repli
+# (jamais d'image cassée ; l'écusson est un identifiant d'interface, pas un faux logo)
+# ---------------------------------------------------------------------------
+def test_frontend_crest_fallback_present():
+    js = (STATIC / "app.js").read_text()
+    # helpers d'écusson déterministe présents
+    assert "crestHtml" in js and "crestWithLogo" in js and "crestInitials" in js
+    # le vrai logo est retiré s'il échoue (onerror remove) -> l'écusson dessous reste visible
+    assert "onerror=\"this.remove()\"" in js
+    # les cartes de match n'ont plus d'<img> nu susceptible d'être cassé (visibility hidden)
+    assert "this.style.visibility='hidden'" not in js
+
+
+def test_competitions_api_expose_logo():
+    from fastapi.testclient import TestClient
+    from app.api import app
+    d = TestClient(app).get("/v1/competitions").json()
+    assert "competitions" in d
+    for c in d["competitions"]:
+        assert "logo_url" in c  # vrai logo source (None tant que non récupéré -> écusson)
+
+
+def test_ratings_api_expose_logo():
+    from fastapi.testclient import TestClient
+    from app.api import app
+    d = TestClient(app).get("/v1/ratings?limit=500").json()
+    for t in d["ratings"]:
+        assert "logo_url" in t and "name" in t

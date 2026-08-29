@@ -6,12 +6,33 @@ set -e
 cd "$(dirname "$0")"
 mkdir -p ../data
 # S'assurer que le répertoire du fichier de base existe (ex. /data monté sur Render).
-python - <<'PY'
+# §90 Render : si DATABASE_URL pointe vers un répertoire non accessible en écriture
+# (ex. /data sans disque persistant sur une instance non-root), on bascule
+# automatiquement vers une base située dans le répertoire de l'application, qui est
+# toujours accessible en écriture. Aucune donnée n'est jamais inventée pour autant :
+# seule la localisation du fichier change ; le bootstrap reste idempotent.
+DB_FIX=$(DATABASE_URL="${DATABASE_URL:-}" python - <<'PY'
+import os
 from pathlib import Path
-from app.config import DATABASE_URL
-if DATABASE_URL.startswith("sqlite:///"):
-    Path(DATABASE_URL.replace("sqlite:///", "", 1)).parent.mkdir(parents=True, exist_ok=True)
+url = os.environ.get("DATABASE_URL", "")
+if url.startswith("sqlite:///"):
+    db_path = Path(url.replace("sqlite:///", "", 1))
+    parent = db_path.parent
+    try:
+        parent.mkdir(parents=True, exist_ok=True)
+        probe = parent / ".write_test"
+        probe.write_text("ok")
+        probe.unlink()
+    except OSError:
+        fallback = Path(os.getcwd()).resolve().parent / "data" / "prono_sport.db"
+        fallback.parent.mkdir(parents=True, exist_ok=True)
+        print(f"sqlite:///{fallback}")
 PY
+)
+if [ -n "$DB_FIX" ]; then
+  echo "[startup] DATABASE_URL inaccessible en écriture -> bascule sur $DB_FIX"
+  export DATABASE_URL="$DB_FIX"
+fi
 python -m app.cli init-db
 
 NEED=$(python - <<'PY'

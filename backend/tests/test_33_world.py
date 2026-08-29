@@ -250,10 +250,13 @@ def test_cli_espn_world_ne_crashe_pas_sans_league():
 def test_frontend_page_monde_et_recherche():
     html = (STATIC / "index.html").read_text()
     js = (STATIC / "app.js").read_text()
-    assert '#/monde' in html and 'data-nav="monde"' in html
+    # §49 navigation monde : Continents + Pays (l'ancien #/monde redirige vers Continents)
+    assert '#/continents' in html and 'data-nav="continents"' in html
+    assert '#/pays' in html and 'data-nav="pays"' in html
+    assert "monde: renderContinents" in js  # compatibilité des anciens liens #/monde
     assert "research-modal" in html
-    assert "renderMonde" in js and "openResearch" in js
+    assert "openResearch" in js
     assert "/v1/world" in js
     assert "/v1/competitions/" in js and "data-research" in js
-    # le bouton 🔎 est présent (Monde + Compétitions)
-    assert js.count("data-research") >= 2
+    # le bouton 🔎 est présent (Continents + Pays + Compétitions)
+    assert js.count("data-research") >= 3

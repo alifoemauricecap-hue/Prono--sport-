@@ -23,6 +23,7 @@ from pathlib import Path
 from fastapi import FastAPI, Header, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
+from sqlalchemy import or_
 from sqlalchemy.orm import Session, joinedload
 
 from .config import DATABASE_URL
@@ -31,12 +32,16 @@ from .db.models import (
     Bookmaker,
     Competition,
     Fixture,
+    Injury,
     Market,
     Notification,
     OddsSnapshot,
+    Player,
+    PlayerAlias,
     Prediction,
     PredictionResult,
     ProviderHealth,
+    Suspension,
     Team,
     TeamAnalytics,
     ValueBet,
@@ -498,7 +503,8 @@ def list_competitions() -> JSONResponse:
         out = []
         for c in s.query(Competition).order_by(Competition.code).all():
             n = s.query(Fixture).filter(Fixture.competition_id == c.id).count()
-            out.append({"id": c.id, "code": c.code, "name": c.name, "area": c.area, "fixtures": n})
+            out.append({"id": c.id, "code": c.code, "name": c.name, "area": c.area,
+                        "logo_url": c.logo_url, "fixtures": n})
         return JSONResponse({"competitions": out})
 
 
@@ -616,6 +622,90 @@ def get_team(team_id: int) -> JSONResponse:
         })
 
 
+@app.get("/v1/config/keys")
+def config_keys() -> JSONResponse:
+    """§69 : indique QUELLES clés gratuites sont configurées (jamais la valeur).
+    Permet à l'Admin d'afficher les sources optionnelles actives et où les obtenir (0 €)."""
+    def present(name: str) -> bool:
+        return bool(os.environ.get(name, "").strip())
+    keys = [
+        {"key": "TSDB_KEY / THESPORTSDB_KEY", "configured": present("THESPORTSDB_KEY") or True,
+         "gratis": True, "apporte": "métadonnées, logos, backbone mondial (TheSportsDB)",
+         "obtenir": "clé publique de test « 3 » — aucune inscription",
+         "quota": "~30 req/min (test)"},
+        {"key": "FOOTBALL_DATA_ORG_TOKEN", "configured": present("FOOTBALL_DATA_ORG_TOKEN"),
+         "gratis": True, "apporte": "calendriers/résultats/classements (12 compétitions)",
+         "obtenir": "https://www.football-data.org (Register, clé gratuite)",
+         "quota": "10 req/min"},
+        {"key": "API_FOOTBALL_KEY", "configured": present("API_FOOTBALL_KEY"),
+         "gratis": True, "apporte": "compositions officielles + blessures/suspensions, live ~15 s",
+         "obtenir": "https://dashboard.api-football.com (plan Free, sans carte)",
+         "quota": "100 req/jour"},
+        {"key": "ODDS_API_KEY", "configured": present("ODDS_API_KEY"),
+         "gratis": True, "apporte": "cotes de 40+ bookmakers (value bets live)",
+         "obtenir": "https://the-odds-api.com (clé gratuite)",
+         "quota": "500 crédits/mois"},
+    ]
+    return JSONResponse({
+        "keys": keys,
+        "note": "Toutes les clés sont GRATUITES et optionnelles. Sans clé, les fonctions "
+                "non alimentées affichent MISSING DEPENDENCY / DONNÉE INDISPONIBLE, "
+                "jamais de données inventées (§69/§95). À renseigner dans Render → Environment.",
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+    })
+
+
+@app.get("/v1/players")
+def get_players(team_id: int | None = None, q: str | None = None,
+                limit: int = Query(200, le=500)) -> JSONResponse:
+    """§21 JOUEURS : liste uniquement les joueurs réellement fournis par une source
+    (compositions/effectifs API-Football, etc.) avec leur disponibilité réelle (§22).
+    Aucun joueur inventé : table vide -> 'missing_dependency' expliqué côté UI."""
+    with SF() as s:
+        query = s.query(Player)
+        if team_id:
+            query = query.filter(Player.team_id == team_id)
+        if q:
+            like = f"%{q.strip()}%"
+            query = (query.outerjoin(PlayerAlias, PlayerAlias.player_id == Player.id)
+                          .filter(or_(Player.name.ilike(like), PlayerAlias.alias.ilike(like))))
+        players = query.order_by(Player.name).limit(limit).all()
+
+        injuries = {i.player_id: i for i in s.query(Injury).all()}
+        suspensions = {su.player_id: su for su in s.query(Suspension).all()}
+        teams = {t.id: t.name for t in s.query(Team).all()}
+
+        out = []
+        for p in players:
+            status, detail = "AVAILABLE", None
+            if p.id in suspensions:
+                status, detail = "SUSPENDED", suspensions[p.id].reason
+            elif p.id in injuries:
+                inj = injuries[p.id]
+                status, detail = (inj.status or "INJURED"), inj.detail
+            out.append({
+                "id": p.id, "name": p.name,
+                "team_id": p.team_id, "team": teams.get(p.team_id),
+                "position": p.position, "country": p.country,
+                "logo_url": p.logo_url,
+                "availability": status,            # §22
+                "availability_detail": detail,
+                "label": "SOURCE DATA",
+            })
+
+        missing = len(out) == 0
+        return JSONResponse({
+            "count": len(out),
+            "players": out,
+            "missing_dependency": missing,
+            "note": ("Aucun joueur en base : les effectifs/compositions proviennent de "
+                     "l'API-Football (clé gratuite ~100 req/jour). Sans clé, PRONO SPORT "
+                     "n'affiche aucun joueur inventé (§21/§22).") if missing else
+                    "Joueurs issus de sources réelles (compositions/effectifs).",
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+        })
+
+
 @app.get("/v1/ratings")
 def ratings(limit: int = Query(50, le=500)) -> JSONResponse:
     """Classement Elo global (§16) — calculé sur l'historique réel uniquement."""
@@ -630,6 +720,7 @@ def ratings(limit: int = Query(50, le=500)) -> JSONResponse:
         )
         return JSONResponse({"model_version": "elo-v1",
                              "ratings": [{"team_id": t.id, "name": t.name,
+                                          "logo_url": t.logo_url, "country": t.country,
                                           "elo": round(a.elo, 1), "matches": a.matches_rated,
                                           "form5": a.form5} for a, t in rows]})
 
