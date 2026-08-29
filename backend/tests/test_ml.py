@@ -102,6 +102,60 @@ def test_extreme_disagreement_is_no_pick():
     assert res2["level"] in ("POTENTIAL", "QUALIFIED", "STRONG")   # 15 pts : reste analysable
 
 
+def test_repli_elo_pour_ligue_a_mince_historique(session):
+    """§82-bis : une ligue dont l'historique est insuffisant pour Poisson/DC reçoit
+    quand même un pronostic REPLI ELO (jamais laissé vide, jamais une fiction) —
+    étiqueté fallback='elo' dans le snapshot d'audit."""
+    from app.db.models import (
+        Competition, Fixture, ModelVersion, Prediction, Season, Team,
+    )
+    from app.ml.engine import predict_upcoming
+
+    # Ligue MAJEURE : 40 matchs terminés → Elo global bien peuplé (Alpha domine).
+    major = Competition(code="MAJ", name="Major", area="Land")
+    session.add(major); session.flush()
+    season_m = Season(competition_id=major.id, label="2025-2026", start_year=2025, end_year=2026)
+    session.add(season_m); session.flush()
+    tA = Team(name="Alpha United", country="Land")
+    tB = Team(name="Beta City", country="Land")
+    tC = Team(name="Gamma Rovers", country="Land")
+    session.add_all([tA, tB, tC]); session.flush()
+    fin = []
+    for i in range(40):
+        fin.append(Fixture(competition_id=major.id, season_id=season_m.id,
+                           home_team_id=tA.id, away_team_id=tB.id,
+                           kickoff_utc=NOW - timedelta(days=i * 3), status="FINISHED",
+                           home_score=2 + i % 2, away_score=0, source_provider="test",
+                           source_event_id=f"m-{i}", source_url="t"))
+    session.add_all(fin)
+    # Ligue MINCE : 1 seul match terminé → sous min_matches (30), pas de modèle DC.
+    minor = Competition(code="MIN", name="Minor", area="Land")
+    session.add(minor); session.flush()
+    season_mi = Season(competition_id=minor.id, label="2026-2027", start_year=2026, end_year=2027)
+    session.add(season_mi); session.flush()
+    session.add(Fixture(competition_id=minor.id, season_id=season_mi.id,
+                        home_team_id=tA.id, away_team_id=tC.id,
+                        kickoff_utc=NOW - timedelta(days=5), status="FINISHED",
+                        home_score=1, away_score=0, source_provider="test",
+                        source_event_id="mi-f", source_url="t"))
+    future = Fixture(competition_id=minor.id, season_id=season_mi.id,
+                     home_team_id=tA.id, away_team_id=tB.id,
+                     kickoff_utc=NOW + timedelta(hours=30), status="SCHEDULED",
+                     source_provider="test", source_event_id="mi-up", source_url="t")
+    session.add(future)
+    session.commit()
+
+    reports = predict_upcoming(session, now=NOW)
+    pred = session.query(Prediction).filter_by(fixture_id=future.id).one()
+    assert pred.input_snapshot.get("fallback") == "elo"
+    assert pred.feature_version == "v1-elo"
+    probs = pred.probabilities["1X2"]
+    assert abs(sum(probs.values()) - 1.0) < 1e-6
+    assert probs["H"] > probs["A"]       # Alpha (fort Elo) reste favorite
+    # la ligue mince n'a pas de modèle complet → seul le repli Elo est compté
+    assert all(r.competition_code != "MIN" or r.trained_models == 0 for r in reports)
+
+
 def test_sweep_stale_marks_unknown(session):
     """SCHEDULED dont le kickoff est dépassé → UNKNOWN (DONNÉE NON VÉRIFIÉE), sans score inventé."""
     from app.db.models import Competition, Fixture, Season, Team

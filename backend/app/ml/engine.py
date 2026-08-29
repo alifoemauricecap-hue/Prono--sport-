@@ -26,7 +26,7 @@ from ..db.models import (
     ValueBet,
 )
 from ..ingest.resolution import normalize_name
-from ..analytics.elo import compute_ratings, expected_score as elo_expected_home
+from ..analytics.elo import compute_ratings, elo_1x2, expected_score as elo_expected_home
 from .dc_models import fit_dixon_coles, fit_poisson, most_probable_scores, probabilities, score_matrix
 from .odds_math import LEVELS, best_odds_per_selection, evaluate_selection, fair_probabilities
 
@@ -144,6 +144,41 @@ def _elo_global(session: Session):
     return state, name2id, id2name
 
 
+def _elo_fallback(session: Session, fx: Fixture, mv: ModelVersion,
+                  probs, snapshot, elo_state, hi, ai,
+                  home, away, comp_rep: PredictReport) -> None:
+    """§82-bis — pronostic REPLI ELO pour ligues à historique mince.
+
+    Compétition dont l'historique est insuffisant pour Poisson/Dixon-Coles,
+    mais dont les deux équipes ont un rating Elo global (base réelle) :
+    on produit une prédiction 1X2 issue du seul Elo, clairement étiquetée
+    `fallback: "elo"` dans le snapshot (audit §104). Aucune donnée inventée :
+    les ratings proviennent strictement des matchs réels en base.
+    """
+    probs = {"1X2": elo_1x2(elo_state.ratings[hi], elo_state.ratings[ai]),
+             "1X2_ensemble": elo_1x2(elo_state.ratings[hi], elo_state.ratings[ai]),
+             "fallback": "elo"}
+    snapshot = {
+        "history_matches": min(elo_state.played.get(hi, 0),
+                               elo_state.played.get(ai, 0)),
+        "elo_home": elo_state.ratings.get(hi),
+        "elo_away": elo_state.ratings.get(ai),
+        "ensemble": {"model": "elo"},
+        "model_disagreement_1x2H": None,
+        "fallback": "elo",   # §82-bis : modèle simplifié explicite
+    }
+    pred = Prediction(
+        fixture_id=fx.id, model_version_id=mv.id,
+        feature_version="v1-elo", input_snapshot=snapshot,
+        probabilities=probs,
+        expected_goals=None,
+    )
+    session.add(pred)
+    session.flush()
+    comp_rep.predictions += 1
+    _value_scan(session, fx, pred, probs, snapshot, home.name, away.name, comp_rep)
+
+
 def predict_upcoming(session: Session, now: datetime | None = None,
                      competition_code: str | None = None,
                      min_matches: int = 30) -> list[PredictReport]:
@@ -201,9 +236,22 @@ def predict_upcoming(session: Session, now: datetime | None = None,
 
         bundle = models.get(fx.competition_id)
         hk, ak = _team_key(home.name), _team_key(away.name)
+        hi, ai = name2id.get(hk), name2id.get(ak)
+        has_elo = (hi is not None and ai is not None
+                   and hi in elo_state.ratings and ai in elo_state.ratings)
+
+        # REPLI ELO (§82-bis) : compétition à historique MINCE (sous min_matches)
+        # → pas de Poisson/DC, mais on produit quand même un pronostic honnête à
+        # partir des ratings Elo globaux (jamais de fiction : ratings = matchs réels).
         if bundle is None or hk not in bundle["dc"].attack or ak not in bundle["dc"].attack:
-            comp_rep.skipped_no_model += 1   # §82 : historique insuffisant → rien
+            if has_elo:
+                _elo_fallback(session, fx, mv, probs=None, snapshot=None,
+                              elo_state=elo_state, hi=hi, ai=ai,
+                              home=home, away=away, comp_rep=comp_rep)
+            else:
+                comp_rep.skipped_no_model += 1   # §82 : pas même d'Elo → rien
             continue
+
         dc = bundle["dc"]
         comp_rep.trained_models = 1
         comp_rep.matches_1x2 = max(comp_rep.matches_1x2, bundle["hist_len"])
@@ -212,8 +260,7 @@ def predict_upcoming(session: Session, now: datetime | None = None,
         probs = probabilities(M)
         # ENSEMBLE §19 : DC (goals) + Elo (strengths) — moyenne pondérée documentée 70/30
         elo_home_p = None
-        hi, ai = name2id.get(hk), name2id.get(ak)
-        if hi in elo_state.ratings and ai in elo_state.ratings:
+        if has_elo:
             elo_home_p = elo_expected_home(elo_state.ratings[hi], elo_state.ratings[ai])
         if elo_home_p is not None:
             e_dc = probs["1X2"]["H"] + 0.5 * probs["1X2"]["D"]
@@ -238,6 +285,7 @@ def predict_upcoming(session: Session, now: datetime | None = None,
             "elo_away": elo_state.ratings.get(ai) if ai is not None else None,
             "ensemble": {"dc_weight": 0.7, "elo_weight": 0.3},
             "model_disagreement_1x2H": disagreement,
+            "fallback": "dc+elo",   # modèle complet
         }
         pred = Prediction(
             fixture_id=fx.id, model_version_id=mv.id,

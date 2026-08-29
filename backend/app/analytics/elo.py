@@ -14,6 +14,7 @@ Le rating d'une équipe ne reflète QUE les matchs réellement présents en base
 """
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 
 K_FACTOR = 60.0
@@ -66,3 +67,30 @@ def compute_ratings(matches: list[tuple[int, int, int, int]]) -> EloState:
 def win_expectancy(ra: float, rb: float) -> float:
     """Probabilité Elo d'un succès à domicile (sans le nul) — usage affichage uniquement en M3."""
     return expected_score(ra, rb, home=True)
+
+
+def elo_1x2(home_elo: float, away_elo: float,
+            draw_peak: float = 0.28, decay: float = 400.0) -> dict:
+    """REPLI ELO — probabilités 1X2 à partir des seuls ratings Elo globaux.
+
+    Utilisé pour les compétitions à historique MINCE (sous le seuil min_matches
+    de Poisson/Dixon-Coles) : plutôt que de ne rien afficher (§82), on produit
+    un pronostic honnête, clairement étiqueté « repli Elo » dans le snapshot.
+    Aucune donnée inventée : les ratings proviennent strictement des matchs
+    réels de la base.
+
+    Règles (documentées, testées) :
+      - p_home / p_away : force de victoire PURE (sans avantage domicile) issue
+        du classique modèle de Bradley–Terry : p = 1 / (1 + 10^(-Δ/400)).
+      - probabilité de nul : maximale quand les niveaux sont proches (pic =
+        draw_peak, 28 %), décroît exponentiellement à mesure que l'écart de
+        rating grandit (constante de décroissance `decay`).
+      - renormalisation : le triplet est divisé par sa somme pour former une
+        distribution 1X2 valide (H + D + A = 1).
+    """
+    diff = home_elo - away_elo
+    p_home = 1.0 / (1.0 + 10 ** (-diff / 400.0))
+    p_away = 1.0 - p_home
+    draw = draw_peak * math.exp(-abs(diff) / decay)
+    total = p_home + p_away + draw
+    return {"H": p_home / total, "D": draw / total, "A": p_away / total}

@@ -5,6 +5,7 @@ from app.analytics.elo import (
     HOME_FIELD_ADVANTAGE,
     INITIAL_RATING,
     compute_ratings,
+    elo_1x2,
     expected_score,
     margin_multiplier,
 )
@@ -30,6 +31,23 @@ def test_vainqueur_monte_perdant_descend_symetriquement():
     assert st.ratings[1] > INITIAL_RATING > st.ratings[2]
     up, down = st.ratings[1] - INITIAL_RATING, INITIAL_RATING - st.ratings[2]
     assert abs(up - down) < 1e-9                      # zero-sum garanti
+
+
+def test_elo_1x2_repli_est_une_distribution_valide():
+    # REPLI ELO §82-bis : à niveau égal → distribution 1X2 valide, symétrique,
+    # avec un nul significatif (les deux équipes sont proches).
+    p = elo_1x2(1500, 1500)
+    assert abs(p["H"] + p["D"] + p["A"] - 1.0) < 1e-9
+    assert p["H"] == p["A"]
+    assert p["D"] > 0.15
+
+
+def test_elo_1x2_favori_domine_et_nul_decroit():
+    even = elo_1x2(1500, 1500)
+    fav = elo_1x2(1650, 1500)   # 150 pts d'écart → net favori domicile
+    assert fav["H"] > even["H"]
+    assert fav["H"] > fav["A"]
+    assert fav["D"] < even["D"]   # écart de niveau → nul moins probable
 
 
 def test_gagner_contre_fort_rapporte_plus():
