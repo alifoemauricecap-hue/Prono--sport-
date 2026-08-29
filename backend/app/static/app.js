@@ -893,6 +893,111 @@ async function renderMonde() {
   }
 }
 
+/* Ligne de ligue partagée (Continents / Pays / Monde) — données réelles uniquement */
+function leagueRow(l) {
+  return `
+    <div class="world-row">
+      <span class="wname"><b>${esc(l.name)}</b><span class="faint"> · ${esc(l.country)}${l.level ? " · D" + l.level : ""}</span></span>
+      <span class="wmeta">
+        ${l.fixtures > 0 ? `<span class="ev-pos">${l.fixtures} match${l.fixtures > 1 ? "s" : ""}</span>`
+                          : `<span class="faint">en attente de données</span>`}
+        <button class="btn ghost mini-btn" data-research="${esc(l.code)}" title="Recherche approfondie (Wikipedia, 0 €)">🔎</button>
+      </span>
+    </div>`;
+}
+
+/* ---------------- Vue : CONTINENTS / CONFÉDÉRATIONS (§49, §87) ---------------- */
+async function renderContinents() {
+  view.innerHTML = `<div class="loading"><div class="spinner"></div><p>Couverture par continent…</p></div>`;
+  try {
+    const d = await api("/v1/world");
+    const t = d.totals;
+    const confs = Object.entries(d.by_confederation);
+    view.innerHTML = `
+      <h3 class="section-title">🌍 Continents &amp; confédérations</h3>
+      <div class="stat-cards">
+        <div class="stat-card"><div class="v">${t.catalog}</div><div class="l">Ligues au catalogue</div></div>
+        <div class="stat-card"><div class="v">${t.covered}</div><div class="l">Ligues avec données</div></div>
+        <div class="stat-card"><div class="v">${t.fixtures}</div><div class="l">Matchs en base</div></div>
+      </div>
+      <p class="faint mt">🌐 ${esc(d.backbone_world)}. La couverture réelle dépend des sources disponibles (§87) ;
+      une ligue sans donnée reste affichée « en attente », jamais inventée.</p>
+      <div class="grid grid-2">
+        ${confs.map(([conf, n]) => {
+          const ls = d.leagues.filter(l => l.conf === conf);
+          const inDb = ls.filter(l => l.fixtures > 0).length;
+          const fx = ls.reduce((a, l) => a + (l.fixtures || 0), 0);
+          return `
+          <div class="panel">
+            <div class="row spread">
+              <b>${esc(CONF_TXT[conf] || conf)}</b>
+              <span class="muted">${n} ligue${n > 1 ? "s" : ""}</span>
+            </div>
+            <div class="row spread faint">
+              <span>${inDb} avec données · ${fx} matchs</span>
+              <button class="btn ghost mini-btn" data-conf-toggle="${esc(conf)}">${inDb > 0 ? "Détails ▾" : "Ligues ▾"}</button>
+            </div>
+            <div class="world-list conf-list hidden" id="conf-${esc(conf)}">${ls.map(leagueRow).join("")}</div>
+          </div>`;
+        }).join("")}
+      </div>`;
+    view.querySelectorAll("[data-conf-toggle]").forEach(btn => btn.addEventListener("click", () => {
+      const el = document.getElementById("conf-" + btn.dataset.confToggle);
+      el && el.classList.toggle("hidden");
+    }));
+  } catch (e) {
+    view.innerHTML = `<div class="empty"><b>Erreur</b>${esc(e.message)}</div>`;
+  }
+}
+
+/* ---------------- Vue : PAYS (§49, §87) ---------------- */
+async function renderPays() {
+  view.innerHTML = `<div class="loading"><div class="spinner"></div><p>Couverture par pays…</p></div>`;
+  try {
+    const d = await api("/v1/world");
+    const byCountry = {};
+    d.leagues.forEach(l => {
+      const c = l.country || "International";
+      (byCountry[c] = byCountry[c] || []).push(l);
+    });
+    const countries = Object.entries(byCountry).map(([c, ls]) => ({
+      country: c,
+      leagues: ls,
+      fixtures: ls.reduce((a, l) => a + (l.fixtures || 0), 0),
+      inDb: ls.filter(l => l.fixtures > 0).length,
+    })).sort((a, b) => b.fixtures - a.fixtures || a.country.localeCompare(b.country));
+    view.innerHTML = `
+      <h3 class="section-title">🚩 Pays — couverture réelle</h3>
+      <div class="stat-cards">
+        <div class="stat-card"><div class="v">${countries.length}</div><div class="l">Pays / zones au catalogue</div></div>
+        <div class="stat-card"><div class="v">${countries.filter(c => c.fixtures > 0).length}</div><div class="l">Pays avec matchs en base</div></div>
+        <div class="stat-card"><div class="v">${d.totals.fixtures}</div><div class="l">Matchs (tous pays)</div></div>
+      </div>
+      <div class="searchbox mb mt" style="max-width:420px">
+        <input id="pays-search" type="search" placeholder="Filtrer un pays…" autocomplete="off">
+      </div>
+      <div class="grid grid-2" id="pays-grid">
+        ${countries.map(c => `
+          <div class="panel pays-card" data-filter="${esc(c.country.toLowerCase())}">
+            <div class="row spread">
+              <b>🚩 ${esc(c.country)}</b>
+              <span class="muted">${c.leagues.length} ligue${c.leagues.length > 1 ? "s" : ""} · ${c.fixtures} matchs</span>
+            </div>
+            <div class="world-list">${c.leagues.map(leagueRow).join("")}</div>
+          </div>`).join("")}
+      </div>
+      <p class="faint mt">${badge("SOURCE", "Données source")} Couverture dérivée des sources réelles (TheSportsDB/ESPN) — aucune compétition n'est codée en dur (§87).</p>`;
+    const inp = $("#pays-search");
+    inp && inp.addEventListener("input", () => {
+      const q = inp.value.trim().toLowerCase();
+      document.querySelectorAll(".pays-card").forEach(el =>
+        el.style.display = el.dataset.filter.includes(q) ? "" : "none");
+    });
+  } catch (e) {
+    view.innerHTML = `<div class="empty"><b>Erreur</b>${esc(e.message)}</div>`;
+  }
+}
+
 /* Modale : recherche approfondie d'une ligue (0 €) */
 async function openResearch(code) {
   $("#research-modal").classList.remove("hidden");
@@ -924,7 +1029,7 @@ async function openResearch(code) {
 }
 
 /* ---------------- Vue : ADMIN (pilotage réel, §63) ---------------- */
-const ADMIN_TABS = ["apercu", "sources", "sync", "qualite", "backtest", "predictions", "value", "erreurs", "backup"];
+const ADMIN_TABS = ["apercu", "sources", "cles", "sync", "qualite", "backtest", "predictions", "value", "erreurs", "backup"];
 const ADMIN_WORKERS = ["syncFixtures", "syncLiveMatches", "syncResults", "syncLineups", "syncOddsLive", "syncWeather", "syncHistorical", "discoverSources"];
 let ADMIN = { tab: "apercu" };
 function adminToken() { return localStorage.getItem("ps_admin_token") || ""; }
@@ -964,6 +1069,24 @@ async function renderAdmin() {
         <td>${s.reliability != null ? `<b>${s.reliability}</b>` : unav("")}<div class="faint">${esc(s.reliability_note || "")}</div></td>
         <td>${s.availability ? badge(s.availability === "OK" ? "OK" : s.availability, s.availability) : unav("")}</td>
         <td class="faint">${esc(s.terms_status || "")}</td></tr>`).join("")}</tbody></table>`;
+    } else if (ADMIN.tab === "cles") {
+      const d = await api("/v1/config/keys");
+      body.innerHTML = `
+        <div class="panel mb"><div class="bh"><b>🔑 Clés de sources — toutes GRATUITES et optionnelles (0 €)</b></div>
+        <p class="faint">${esc(d.note)}</p></div>
+        ${d.keys.map(k => `
+          <div class="panel mb">
+            <div class="row spread">
+              <b><code>${esc(k.key)}</code></b>
+              ${k.configured
+                ? `<span class="ev-pos">✅ configurée</span>`
+                : `<span class="ev-warn">⬜ non renseignée</span>`}
+            </div>
+            <div class="faint mt">Apporte : ${esc(k.apporte)} · quota : ${esc(k.quota)}</div>
+            <div class="faint">Obtention : ${esc(k.obtenir)}</div>
+          </div>`).join("")}
+        <div class="panel"><div class="faint">💡 Sur Render : service → <b>Environment</b> → ajoutez la variable
+        (ex. <code>API_FOOTBALL_KEY</code>) puis redéployez. La valeur reste secrète côté serveur (§78).</div></div>`;
     } else if (ADMIN.tab === "sync") {
       const d = await api("/v1/sync-jobs");
       body.innerHTML = `
@@ -1058,7 +1181,8 @@ async function renderAdmin() {
 const ROUTES = {
   accueil: renderAccueil, live: renderLive, avenir: renderAvenir,
   termes: renderTermine, termines: renderTermine, competitions: renderCompetitions,
-  monde: renderMonde, equipes: renderEquipes, joueurs: renderJoueurs,
+  monde: renderContinents, continents: renderContinents, pays: renderPays,
+  equipes: renderEquipes, joueurs: renderJoueurs,
   pronostics: renderPronostics,
   value: renderValue, analyses: renderAnalyses, assistant: renderAssistant,
   favoris: renderFavoris, admin: renderAdmin,

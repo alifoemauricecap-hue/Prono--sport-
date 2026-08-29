@@ -621,6 +621,39 @@ def get_team(team_id: int) -> JSONResponse:
         })
 
 
+@app.get("/v1/config/keys")
+def config_keys() -> JSONResponse:
+    """§69 : indique QUELLES clés gratuites sont configurées (jamais la valeur).
+    Permet à l'Admin d'afficher les sources optionnelles actives et où les obtenir (0 €)."""
+    def present(name: str) -> bool:
+        return bool(os.environ.get(name, "").strip())
+    keys = [
+        {"key": "TSDB_KEY / THESPORTSDB_KEY", "configured": present("THESPORTSDB_KEY") or True,
+         "gratis": True, "apporte": "métadonnées, logos, backbone mondial (TheSportsDB)",
+         "obtenir": "clé publique de test « 3 » — aucune inscription",
+         "quota": "~30 req/min (test)"},
+        {"key": "FOOTBALL_DATA_ORG_TOKEN", "configured": present("FOOTBALL_DATA_ORG_TOKEN"),
+         "gratis": True, "apporte": "calendriers/résultats/classements (12 compétitions)",
+         "obtenir": "https://www.football-data.org (Register, clé gratuite)",
+         "quota": "10 req/min"},
+        {"key": "API_FOOTBALL_KEY", "configured": present("API_FOOTBALL_KEY"),
+         "gratis": True, "apporte": "compositions officielles + blessures/suspensions, live ~15 s",
+         "obtenir": "https://dashboard.api-football.com (plan Free, sans carte)",
+         "quota": "100 req/jour"},
+        {"key": "ODDS_API_KEY", "configured": present("ODDS_API_KEY"),
+         "gratis": True, "apporte": "cotes de 40+ bookmakers (value bets live)",
+         "obtenir": "https://the-odds-api.com (clé gratuite)",
+         "quota": "500 crédits/mois"},
+    ]
+    return JSONResponse({
+        "keys": keys,
+        "note": "Toutes les clés sont GRATUITES et optionnelles. Sans clé, les fonctions "
+                "non alimentées affichent MISSING DEPENDENCY / DONNÉE INDISPONIBLE, "
+                "jamais de données inventées (§69/§95). À renseigner dans Render → Environment.",
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+    })
+
+
 @app.get("/v1/players")
 def get_players(team_id: int | None = None, q: str | None = None,
                 limit: int = Query(200, le=500)) -> JSONResponse:

@@ -1,37 +1,48 @@
 #!/bin/sh
-# PRONO SPORT 3.0 — bootstrap UNIVERSel MONDIAL (Koyeb / Render / HF / VPS / Termux).
-# Remplit la base depuis les sources publiques (0 €) :
-#   [1/6] backbone MONDIAL TheSportsDB eventsday (TOUS les matchs du monde, 1 requête/jour)
-#   [2/6] ESPN catalogue mondial (57 ligues, 6 confédérations, J-3 à J+2)
-#   [3/6] fduk (historiques profonds + cotes multi-bookmakers, 22 divisions)
-#   [4/6] cohérence + logos réels
-#   [5/6] analytics + prédictions + value bets
-#   [6/6] recherche approfondie par LIGUE (Wikipedia FR/EN, 0 €)
-# Idempotent : relançable sans casse. || true = une source KO n'arrête jamais le tout (§64).
+# PRONO SPORT 3.0 — bootstrap MONDIAL par ÉTAPES (Render free / Koyeb / HF / VPS / Termux).
+# Principe §88 "qualité avant quantité" + robustesse instance free (512 Mo) :
+#   ÉTAPE A (quelques minutes) : matchs du jour/à venir + Big 5 historiques + modèles
+#        -> l'application devient UTILE tout de suite (live, pronostics, value bets).
+#   ÉTAPE B (arrière-plan, après)   : profondeur (reste des ligues, médias, recherche).
+# Toutes les étapes sont idempotentes et `|| true` : une source KO n'arrête jamais le
+# tout (§64 failover). Jamais de données inventées : seules des sources publiques réelles.
 cd "$(dirname "$0")"
 export PYTHONIOENCODING=utf-8
 
-echo "[1/6] BACKBONE MONDIAL — TheSportsDB eventsday : TOUS les matchs du monde (J-4 à J)... 1 requête/jour, 0 €"
-python -m app.cli ingest-tsdb-day --days 5 || true
+echo "[A1] BACKBONE MONDIAL — TheSportsDB eventsday : matchs du jour/du monde (1 requête, 0 €)..."
+python -m app.cli ingest-tsdb-day --days 2 || true
 
-echo "[2/6] ESPN — catalogue mondial (57 ligues, 6 confédérations, J-3 à J+2)..."
-python -m app.cli ingest-espn --world --days-back 3 --days-ahead 2 || true
-python -m app.cli ingest-openligadb --leagues bl1 bl2 bl3 --years 2025 2026 || true
+echo "[A2] ESPN — ligues majeures J-2 à J+2 (live + à venir + logos)..."
+python -m app.cli ingest-espn --world --conf UEFA --days-back 2 --days-ahead 2 || true
 
-echo "[3/6] fduk — historiques vrais + cotes actuelles (22 divisions)..."
-python -m app.cli ingest-fduk --divs E0 E1 E2 E3 EC SC0 SC1 SC2 SC3 D1 D2 I1 I2 SP1 SP2 F1 F2 N1 B1 P1 T1 G1 --seasons 2526 2627 || true
+echo "[A3] fduk — Big 5 historiques + cotes multi-bookmakers (base modèles, 0 €)..."
+python -m app.cli ingest-fduk --divs E0 D1 I1 SP1 F1 --seasons 2526 2627 || true
 python -m app.cli ingest-fduk-fixtures || true
 
-echo "[4/6] cohérence + logos réels..."
+echo "[A4] cohérence + modèles + value bets (la valeur arrive vite)..."
 python -m app.cli sweep-stale || true
 python -m app.cli verify || true
-python -m app.cli espn-media || true
-
-echo "[5/6] analytics + prédictions + value bets..."
 python -m app.cli compute-analytics || true
 python -m app.cli compute-predictions || true
 
-echo "[6/6] RECHERCHE APPROFONDIE par ligue (Wikipedia FR/EN, CC BY-SA, 0 €)..."
+echo "[A-OK] ÉTAPE A TERMINÉE — live, pronostics et value bets disponibles sur les ligues majeures."
+
+# ----------------------------------------------------------------------------
+# ÉTAPE B : approfondissement (non bloquant, peut être interrompu sans risque)
+# ----------------------------------------------------------------------------
+echo "[B1] ESPN — reste de la couverture mondiale (CONMEBOL/CONCACAF/AFC/CAF/international)..."
+python -m app.cli ingest-espn --world --days-back 3 --days-ahead 2 || true
+python -m app.cli ingest-openligadb --leagues bl1 bl2 bl3 --years 2025 2026 || true
+
+echo "[B2] fduk — profondeur historique (autres divisions + saisons)..."
+python -m app.cli ingest-fduk --divs E1 E2 E3 EC SC0 SC1 SC2 SC3 D2 I2 SP2 F2 N1 B1 P1 T1 G1 --seasons 2526 2627 || true
+
+echo "[B3] médias (logos) + recalcul après extension..."
+python -m app.cli espn-media || true
+python -m app.cli compute-analytics || true
+python -m app.cli compute-predictions || true
+
+echo "[B4] RECHERCHE APPROFONDIE par ligue (Wikipedia FR/EN, CC BY-SA, 0 €)..."
 python -m app.cli world-research || true
 
-echo "[6/6] BOOTSTRAP MONDIAL TERMINE — données réelles prêtes."
+echo "[B-OK] BOOTSTRAP MONDIAL COMPLET — toutes les sources gratuites exploitées."
