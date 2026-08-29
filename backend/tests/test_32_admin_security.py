@@ -366,3 +366,34 @@ def test_admin_onglet_cles_present():
     js = (STATIC / "app.js").read_text()
     assert '"cles"' in js
     assert "/v1/config/keys" in js
+
+
+# ---------------------------------------------------------------------------
+# Logos : vrai logo source quand disponible, écusson déterministe en repli
+# (jamais d'image cassée ; l'écusson est un identifiant d'interface, pas un faux logo)
+# ---------------------------------------------------------------------------
+def test_frontend_crest_fallback_present():
+    js = (STATIC / "app.js").read_text()
+    # helpers d'écusson déterministe présents
+    assert "crestHtml" in js and "crestWithLogo" in js and "crestInitials" in js
+    # le vrai logo est retiré s'il échoue (onerror remove) -> l'écusson dessous reste visible
+    assert "onerror=\"this.remove()\"" in js
+    # les cartes de match n'ont plus d'<img> nu susceptible d'être cassé (visibility hidden)
+    assert "this.style.visibility='hidden'" not in js
+
+
+def test_competitions_api_expose_logo():
+    from fastapi.testclient import TestClient
+    from app.api import app
+    d = TestClient(app).get("/v1/competitions").json()
+    assert "competitions" in d
+    for c in d["competitions"]:
+        assert "logo_url" in c  # vrai logo source (None tant que non récupéré -> écusson)
+
+
+def test_ratings_api_expose_logo():
+    from fastapi.testclient import TestClient
+    from app.api import app
+    d = TestClient(app).get("/v1/ratings?limit=500").json()
+    for t in d["ratings"]:
+        assert "logo_url" in t and "name" in t

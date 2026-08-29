@@ -70,6 +70,54 @@ function star(fxId) {
   return `<span class="star ${on ? "on" : ""}" data-fav="${fxId}">${on ? "★" : "☆"}</span>`;
 }
 
+/* ---------------- Écussons déterministes (repli visuel, JAMAIS une fausse donnée) ----------------
+   Deux couches superposées : un badge généré localement (initiales + couleur stable par nom)
+   reste visible en dessous ; le VRAI logo (ESPN/TheSportsDB) est posé par-dessus et le masque
+   s'il se charge. Résultat : aucune image cassée, chaque équipe/joueur a toujours un visuel.
+   Le badge généré est un identifiant d'interface (CALCULÉ), pas un logo de club inventé. */
+function crestInitials(name) {
+  const s = (name || "?").normalize("NFD").replace(/[̀-ͯ]/g, "").toUpperCase();
+  const words = s.replace(/[^A-Z0-9 &-]/g, " ").split(/\s+/).filter(Boolean);
+  const STOP = new Set(["FC", "CF", "AC", "AS", "SS", "SC", "AFC", "SK", "FK", "UD", "CD", "SPORTING", "CLUB", "THE", "DE", "OF"]);
+  const meaningful = words.filter(w => !STOP.has(w) && !/^\d+$/.test(w));
+  const pick = meaningful.length ? meaningful : words;
+  if (!pick.length) return "?";
+  if (pick.length === 1) return pick[0].slice(0, 3);
+  return (pick[0][0] + pick[pick.length - 1][0]).slice(0, 2);
+}
+function crestHue(name) {
+  let h = 0;
+  for (let i = 0; i < (name || "?").length; i++) h = (h * 31 + name.charCodeAt(i)) >>> 0;
+  return h % 360;
+}
+function crestHtml(name, cls) {
+  const init = crestInitials(name);
+  const hue = crestHue(name || "?");
+  return `<span class="crest ${cls || ""}" style="background:linear-gradient(135deg,hsl(${hue},45%,42%),hsl(${(hue + 40) % 360},55%,30%));color:#fff" aria-hidden="true">${esc(init)}</span>`;
+}
+/* Cœur commun : écusson dessous + vrai logo par-dessus (retiré s'il échoue → écusson visible). */
+function crestWithLogo(name, url, cls) {
+  const size = cls || "";
+  if (url) {
+    return `<span class="crest-wrap ${size}">${crestHtml(name, "crest-bg")}` +
+           `<img class="crest-img" loading="lazy" src="${esc(url)}" alt="" onerror="this.remove()"></span>`;
+  }
+  return crestHtml(name, size);
+}
+function normTeam(t) {
+  if (t == null) return { name: "?" };
+  if (typeof t === "string") return { name: t, logo_url: null };
+  return { name: t.name || "?", logo_url: t.logo_url || null };
+}
+function teamLogo(team, cls) {
+  const t = normTeam(team);
+  return crestWithLogo(t.name, t.logo_url, cls);
+}
+function playerAvatar(p, cls) {
+  const t = normTeam(p);
+  return crestWithLogo(t.name, t.logo_url, cls);
+}
+
 /* ---------------- Favoris (local) ---------------- */
 const FAV = new Set(JSON.parse(localStorage.getItem("ps_fav") || "[]"));
 function saveFav() { localStorage.setItem("ps_fav", JSON.stringify([...FAV])); }
@@ -115,12 +163,12 @@ function matchCard(card) {
       ${badge(st)} ${star(card.id)}
     </div>
     <div class="fx-team">
-      <img loading="lazy" src="${esc(card.home?.logo_url || "")}" alt="" onerror="this.style.visibility='hidden'">
+      ${teamLogo(card.home, "logo-sm")}
       <span class="tname">${esc(card.home?.name || "?")}</span>
       <span class="score">${card.status === "FINISHED" || ["LIVE","HALFTIME","EXTRA_TIME","PENALTIES"].includes(card.status) ? (card.score?.ft_home ?? "") : ""}</span>
     </div>
     <div class="fx-team away">
-      <img loading="lazy" src="${esc(card.away?.logo_url || "")}" alt="" onerror="this.style.visibility='hidden'">
+      ${teamLogo(card.away, "logo-sm")}
       <span class="tname">${esc(card.away?.name || "?")}</span>
       <span class="score">${card.status === "FINISHED" || ["LIVE","HALFTIME","EXTRA_TIME","PENALTIES"].includes(card.status) ? (card.score?.ft_away ?? "") : ""}</span>
     </div>
@@ -245,7 +293,8 @@ async function renderCompetitions() {
     ${c.competitions.map(x => {
       const qq = qmap[x.code];
       return `<div class="panel" style="cursor:pointer" data-comp="${esc(x.code)}">
-        <div class="row spread"><b>${esc(x.name)}</b>
+        <div class="row spread">
+          <span style="display:inline-flex;align-items:center;gap:9px">${crestWithLogo(x.name, x.logo_url, "logo-xs")}<b>${esc(x.name)}</b></span>
           <span style="display:flex;gap:8px;align-items:center">
           <button class="btn ghost mini-btn" data-research="${esc(x.code)}" title="Recherche approfondie de la ligue (0 €)">🔎</button>
           ${qq?.score != null ? `<span class="muted">${qq.score}/100</span>` : unav("")}</span></div>
@@ -430,7 +479,7 @@ async function renderEquipes() {
       <tbody>
       ${rows.map((t, i) => `<tr>
         <td class="faint">${i + 1}</td>
-        <td><b>${esc(t.name)}</b></td>
+        <td><span style="display:inline-flex;align-items:center;gap:8px">${teamLogo(t, "logo-xs")}<b>${esc(t.name)}</b></span></td>
         <td><b>${t.elo}</b></td>
         <td>${t.form5 ? t.form5.split("").map(c =>
           `<span class="badge ${c === "W" ? "b-ok" : c === "D" ? "b-na" : "b-down"}" style="padding:1px 4px">${c === "W" ? "V" : c === "D" ? "N" : "D"}</span>`).join(" ") : "—"}</td>
@@ -563,10 +612,10 @@ function renderMcHeader() {
       ${badge(a?.fixture?.data_status || c?.data_status)}
       ${live ? badge("LIVE") : ""}</div>
     <div class="mc-teams">
-      <div class="mc-team"><img src="${esc(c?.home?.logo_url || "")}" alt=""><span class="n">${esc(c?.home?.name || "?")}</span>
+      <div class="mc-team">${teamLogo(c?.home, "logo-lg")}<span class="n">${esc(c?.home?.name || "?")}</span>
         <span class="mini">Elo ${c?.home?.elo ?? "—"} · forme ${esc(c?.home?.form5 || "—")}</span></div>
       <div class="mc-score">${c?.status === "FINISHED" || live ? `${c?.score?.ft_home ?? 0} – ${c?.score?.ft_away ?? 0}` : fmtTime(c?.kickoff_utc)}</div>
-      <div class="mc-team"><img src="${esc(c?.away?.logo_url || "")}" alt=""><span class="n">${esc(c?.away?.name || "?")}</span>
+      <div class="mc-team">${teamLogo(c?.away, "logo-lg")}<span class="n">${esc(c?.away?.name || "?")}</span>
         <span class="mini">Elo ${c?.away?.elo ?? "—"} · forme ${esc(c?.away?.form5 || "—")}</span></div>
     </div>
     <div class="mc-meta">
@@ -804,7 +853,7 @@ async function renderJoueurs() {
         ${d.players.map(p => `
           <div class="panel player-row" data-filter="${esc((p.name + " " + (p.team || "") + " " + (p.position || "")).toLowerCase())}">
             <div class="row spread">
-              <b>${p.logo_url ? `<img src="${esc(p.logo_url)}" alt="" class="mini-logo" onerror="this.remove()">` : "👤"} ${esc(p.name)}</b>
+              <b>${playerAvatar(p, "logo-xs")} ${esc(p.name)}</b>
               <span class="${availColor[p.availability] || "muted"}">${availTxt[p.availability] || esc(p.availability)}</span>
             </div>
             <div class="faint">${esc(p.team || "Équipe inconnue")} · ${esc(p.position || "poste —")} ${p.country ? "· " + esc(p.country) : ""}</div>

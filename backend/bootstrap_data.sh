@@ -19,13 +19,16 @@ echo "[A3] fduk — Big 5 historiques + cotes multi-bookmakers (base modèles, 0
 python -m app.cli ingest-fduk --divs E0 D1 I1 SP1 F1 --seasons 2526 2627 || true
 python -m app.cli ingest-fduk-fixtures || true
 
-echo "[A4] cohérence + modèles + value bets (la valeur arrive vite)..."
+echo "[A4] logos RÉELS des équipes (ESPN media, 1 appel/ligue)..."
+python -m app.cli espn-media || true
+
+echo "[A5] cohérence + modèles + value bets (la valeur arrive vite)..."
 python -m app.cli sweep-stale || true
 python -m app.cli verify || true
 python -m app.cli compute-analytics || true
 python -m app.cli compute-predictions || true
 
-echo "[A-OK] ÉTAPE A TERMINÉE — live, pronostics et value bets disponibles sur les ligues majeures."
+echo "[A-OK] ÉTAPE A TERMINÉE — live, pronostics, value bets et logos disponibles sur les ligues majeures."
 
 # ----------------------------------------------------------------------------
 # ÉTAPE B : approfondissement (non bloquant, peut être interrompu sans risque)

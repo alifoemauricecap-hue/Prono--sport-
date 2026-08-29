@@ -503,7 +503,8 @@ def list_competitions() -> JSONResponse:
         out = []
         for c in s.query(Competition).order_by(Competition.code).all():
             n = s.query(Fixture).filter(Fixture.competition_id == c.id).count()
-            out.append({"id": c.id, "code": c.code, "name": c.name, "area": c.area, "fixtures": n})
+            out.append({"id": c.id, "code": c.code, "name": c.name, "area": c.area,
+                        "logo_url": c.logo_url, "fixtures": n})
         return JSONResponse({"competitions": out})
 
 
@@ -719,6 +720,7 @@ def ratings(limit: int = Query(50, le=500)) -> JSONResponse:
         )
         return JSONResponse({"model_version": "elo-v1",
                              "ratings": [{"team_id": t.id, "name": t.name,
+                                          "logo_url": t.logo_url, "country": t.country,
                                           "elo": round(a.elo, 1), "matches": a.matches_rated,
                                           "form5": a.form5} for a, t in rows]})
 
